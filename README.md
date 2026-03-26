@@ -1,2 +1,0 @@
-# Jules
-My work projects
