@@ -1,13 +1,13 @@
 Attribute VB_Name = "Matcher"
 Option Explicit
-          
+
 ' ==========================================================
 ' MASTER MATCHER MODULE - PART 1 of 3
 ' ==========================================================
-          
+
 Private mLookupPhraseSet As Object
-Public mAliasDict As Object
-Public mStopWords As Object
+Private mAliasDict As Object
+Private mStopWords As Object
 Private mBoostDict As Object
 Private mCoreSet As Object
 Private mQualSet As Object
@@ -31,13 +31,18 @@ Private mLookupVocab As Object
 Private mTokenWeights As Object
 Private mTokenCatFreq As Object
 Private mSignatureDict As Object
-          
-Private MIN_MATCH_THRESHOLD As Double
+
+Private Const MIN_MATCH_THRESHOLD As Double = 0.5
 Private Const DOMINANCE_MARGIN As Double = 0.3
 Private Const MIN_REQUIRED_OVERLAP_DEFAULT As Long = 2
 Private Const PICK_SHEET_NAME As String = "PickLists"
 Private Const LEARNED_SHEET As String = "LearnedMappings"
-          
+Private Const SHEET_HELPER As String = "Helper Sheet"
+Private Const SHEET_LOOKUP As String = "Uniformat RS Means Lookup"
+Private Const SHEET_RULES As String = "Rules Sheet"
+Private Const AI_SERVER_URL As String = "http://127.0.0.1:5000"
+Private Const AI_SERVER_URL As String = "http://127.0.0.1:5000"
+
 ' Category prepass
 Private mCategoryDict As Object
 Private mCategoryKeys() As String
@@ -45,7 +50,7 @@ Private mCategoryCount As Long
 Private mCategoryAliasIndex As Object
 Private mRegEx As Object
 Private mExternalFileCache As Object
-          
+
 ' Learned Overrides
 Private mLearnedExact As Object
 Private mLearnedSigBest As Object
@@ -53,34 +58,32 @@ Private mLearnedSigCount As Object
 Private mLearnedVocabSigBest As Object
 Private mLearnedLoaded As Boolean
 Private mLearnedSubstKeys() As String
-          
+
 Public Sub MatchInputToLookup_Top3Matches_Vertical_Fast()
     DoMatchingAndAttachDropDowns
 End Sub
-          
-' ==========================================================
-' UPDATED: MatchOnlyChangedRows (Perfectly Cleans Pasted Data)
-' ==========================================================
+
 Public Sub MatchOnlyChangedRows(ByVal rngChanged As Range)
     Dim wsInput As Worksheet, wsLookup As Worksheet
-    Dim lastInputRow As Long, minRow As Long, maxRow As Long
+    Dim lastInputRow As Long
+    Dim minRow As Long, maxRow As Long
     Dim rowsDict As Object, c As Range
     Dim outVal As String, confVal As String
     Dim i As Long
     Dim dataArr As Variant
-     
+
     On Error GoTo CleanFail
     Set wsInput = rngChanged.Worksheet
     Set wsLookup = GetLookupSheet()
     If wsLookup Is Nothing Then Exit Sub
-     
+
     Set rowsDict = CreateObject("Scripting.Dictionary")
     lastInputRow = wsInput.Cells(wsInput.Rows.count, "A").End(xlUp).Row
-     
+
     ' 1. Find the exact boundaries
     minRow = lastInputRow
     maxRow = 2
-     
+
     For Each c In rngChanged
         If c.Column = 1 Then
             If c.Row >= 2 And c.Row <= lastInputRow Then
@@ -90,172 +93,149 @@ Public Sub MatchOnlyChangedRows(ByVal rngChanged As Range)
             End If
         End If
     Next c
-     
+
     If rowsDict.count = 0 Then Exit Sub
-     
+
     InitializeMatcher wsLookup
-     
+
     With Application
         .ScreenUpdating = False
         .Calculation = xlCalculationManual
         .EnableEvents = False
     End With
-     
+
     Dim targetRange As Range
     Set targetRange = wsInput.Range("A" & minRow & ":C" & maxRow)
     dataArr = targetRange.Value2
-     
+
     ' 1. THE SORTING OFFICE (Fixed!)
     Dim uniquePhrases As Object
     Set uniquePhrases = CreateObject("Scripting.Dictionary")
-     
+
     For i = 1 To UBound(dataArr, 1)
-        Dim val As String, cleanVal As String
+        Dim strVal As String, cleanVal As String
         If Not IsError(dataArr(i, 1)) Then
-            val = CStr(dataArr(i, 1))
-            If Len(Trim$(val)) > 0 Then
+            strVal = CStr(dataArr(i, 1))
+            If Len(Trim$(strVal)) > 0 Then
                 ' --- NEW: We MUST clean the text so the engine understands it! ---
-                cleanVal = CleanPastedOutput(val)
+                cleanVal = CleanPastedOutput(strVal)
                 ' Also overwrite the messy data array so Column A is perfectly clean
                 dataArr(i, 1) = cleanVal
-                
+
                 If Not uniquePhrases.Exists(cleanVal) Then
                     uniquePhrases.Add cleanVal, Array("", "")
                 End If
             End If
         End If
     Next i
-     
+
     ' 2. PROCESS UNIQUE PHRASES
     Dim k As Variant
     For Each k In uniquePhrases.keys
         GetBestMatchForInput CStr(k), outVal, confVal
         uniquePhrases(k) = Array(outVal, confVal)
     Next k
-     
+
     ' 3. APPLY ANSWERS BACK
     For i = 1 To UBound(dataArr, 1)
         Dim actualRow As Long
         actualRow = minRow + i - 1
-         
+
         If rowsDict.Exists(actualRow) Then
             If Not IsError(dataArr(i, 1)) Then
-                val = CStr(dataArr(i, 1))
-                If Len(val) > 0 Then
-                    dataArr(i, 2) = uniquePhrases(val)(0)
-                    dataArr(i, 3) = uniquePhrases(val)(1)
+                strVal = CStr(dataArr(i, 1))
+                If Len(strVal) > 0 Then
+                    dataArr(i, 2) = uniquePhrases(strVal)(0)
+                    dataArr(i, 3) = uniquePhrases(strVal)(1)
                 End If
             Else
                 dataArr(i, 3) = "Input Error"
             End If
         End If
     Next i
-     
+
     targetRange.Value2 = dataArr
-wsInput.Range("B" & minRow & ":B" & maxRow).WrapText = True
-     
-    ' =======================================================
-    ' NEW: BATCHED DROPDOWN GENERATION WITH UI BREATHER
-    ' =======================================================
+    wsInput.Range("B" & minRow & ":B" & maxRow).WrapText = True
+
+    ' Create Dropdowns
     Dim r As Variant
-    Dim dropCount As Long
-    dropCount = 0
-    
-    ' Let the user know the script hasn't frozen
-    Application.StatusBar = "Building Dropdowns (0 of " & rowsDict.count & ")..."
-    
     For Each r In rowsDict.keys
         CreateSelectionListForSingleRow wsInput, CLng(r)
-        
-        dropCount = dropCount + 1
-        
-        ' Give Excel's UI stack a breather every 50 rows so it doesn't drop commands
-        If dropCount Mod 50 = 0 Then
-            Application.StatusBar = "Building Dropdowns (" & dropCount & " of " & rowsDict.count & ")..."
-            DoEvents
-        End If
     Next r
- 
+
 CleanExit:
     With Application
         .ScreenUpdating = True
         .Calculation = xlCalculationAutomatic
         .EnableEvents = True
-        .StatusBar = False ' Clear the status bar
     End With
     Exit Sub
-    
 CleanFail:
     MsgBox "Error in MatchOnlyChangedRows: " & Err.Description, vbCritical
     Resume CleanExit
 End Sub
-          
-' ==========================================================
-' UPDATED: CleanupOrphanedPickLists (Scoping the error handler)
-' ==========================================================
+
 Public Sub CleanupOrphanedPickLists()
     Dim nm As Name
+    On Error Resume Next
     For Each nm In ThisWorkbook.names
-        If nm.Name Like "PickRow_*" Then
-            On Error Resume Next
-            nm.Delete
-            On Error GoTo 0
-        End If
+        If nm.Name Like "PickRow_*" Then nm.Delete
     Next nm
+    On Error GoTo 0
 End Sub
-          
+
 Public Sub RecordLearnedOverride(ByVal rowNum As Long)
     Dim wsInput As Worksheet, wsLearn As Worksheet
     Dim rawInput As String, chosen As String
     Dim normalized As String, sig As String
     Dim lastRow As Long, f As Range
     Dim wsLookup As Worksheet
-           
+
     If rowNum < 2 Then Exit Sub
-               
+
     On Error Resume Next
-    Set wsInput = ThisWorkbook.Worksheets("Helper Sheet")
+    Set wsInput = ThisWorkbook.Worksheets(SHEET_HELPER)
     On Error GoTo 0
-               
+
     If wsInput Is Nothing Then Exit Sub
-           
+
     rawInput = CStr(wsInput.Cells(rowNum, "A").Value2)
     chosen = CStr(wsInput.Cells(rowNum, "B").Value2)
-     
+
     ' --- NEW: MULTIPLE RULES PROTECTION (Dropdown Check) ---
     Dim skipPermanentSave As Boolean
     skipPermanentSave = IsValueFromDropdown(wsInput, rowNum, chosen)
     ' --------------------------------------
-               
+
     chosen = SanitizeLearnedOutput(chosen)
     If Not IsValidOutputList(chosen) Then Exit Sub
     If Len(Trim$(rawInput)) = 0 Then Exit Sub
     If Len(Trim$(chosen)) = 0 Then Exit Sub
-           
+
     If mAliasDict Is Nothing Then EnsureDictionaries
     LoadLearnedOverrides
-           
+
     normalized = NormalizeAndAlias(rawInput, mAliasDict)
     If Len(normalized) = 0 Then Exit Sub
-           
+
     sig = BuildLearnSignature(normalized)
-     
+
     ' --- ONLY SAVE TO PERMANENT MEMORY IF SAFE ---
     If Not skipPermanentSave Then
         EnsureLearnedSheet
         Set wsLearn = ThisWorkbook.Worksheets(LEARNED_SHEET)
-               
+
         mLearnedExact(normalized) = chosen
-       
+
         If Len(sig) > 0 Then
             mLearnedSigBest(sig) = chosen
             If Not mLearnedSigCount.Exists(sig) Then mLearnedSigCount(sig) = 0
             mLearnedSigCount(sig) = CLng(mLearnedSigCount(sig)) + 1
         End If
-               
+
         lastRow = wsLearn.Cells(wsLearn.Rows.count, "A").End(xlUp).Row
         If lastRow < 2 Then lastRow = 1
-                   
+
         Set f = wsLearn.Range("A2:A" & lastRow).Find(What:=normalized, LookIn:=xlValues, LookAt:=xlWhole)
         If Not f Is Nothing Then
             wsLearn.Cells(f.Row, "B").Value2 = chosen
@@ -269,53 +249,51 @@ Public Sub RecordLearnedOverride(ByVal rowNum As Long)
             wsLearn.Cells(lastRow + 1, "D").Value2 = 1
             wsLearn.Cells(lastRow + 1, "E").Value2 = Now
         End If
-                   
+
         AppendToExternalFile normalized, chosen, sig
-        
+
         ' --- NEW: SEND CORRECTION TO PYTHON AI ---
         Call TeachPythonAI(rawInput, chosen)
     End If
-      
+
     ' --- ALWAYS TRIGGER AUTO-PROPAGATION ACROSS THE SHEET ---
     Call PropagateLearnedChoice(wsInput, rowNum, sig, normalized, chosen)
 End Sub
-          
+
 Public Function SanitizeLearnedOutput(ByVal outP As String) As String
     If LCase$(Trim$(outP)) = "d of the" Then SanitizeLearnedOutput = "": Exit Function
     SanitizeLearnedOutput = outP
 End Function
-          
-Public Function IsValidOutputList(ByVal testVal As String) As Boolean
-    ' 1. Wake up the engine if it's sleeping
-    If mLookupCount = 0 Then
-        Dim wsL As Worksheet: Set wsL = GetLookupSheet()
+
+Public Function IsValidOutputList(ByVal outP As String) As Boolean
+    Dim parts() As String, i As Long, s As String
+
+    If mLookupPhraseSet Is Nothing Then
+        Dim wsL As Worksheet
+        Set wsL = GetLookupSheet()
         If Not wsL Is Nothing Then InitializeMatcher wsL
     End If
 
-    ' 2. Aggressively clean the pasted text
-    Dim cleanVal As String
-    cleanVal = Trim$(testVal)
-    cleanVal = Replace(cleanVal, vbCrLf, "")
-    cleanVal = Replace(cleanVal, vbCr, "")
-    cleanVal = Replace(cleanVal, vbLf, "")
-    cleanVal = LCase$(cleanVal) ' Force lowercase for comparison
-    
-    ' 3. Check against the lookup cache
-    Dim i As Long
-    For i = 1 To mLookupCount
-        If Len(mLookupPhrases(i)) > 0 Then
-            ' Force the database string to lowercase for a true 1-to-1 check
-            If LCase$(Trim$(mLookupPhrases(i))) = cleanVal Then
-                IsValidOutputList = True
-                Exit Function
-            End If
+    If mLookupPhraseSet Is Nothing Then Exit Function
+
+    outP = Replace(outP, vbCrLf, vbLf)
+    outP = Replace(outP, vbCr, vbLf)
+    outP = Trim$(outP)
+
+    If Len(outP) = 0 Then Exit Function
+
+    parts = Split(outP, vbLf)
+
+    For i = LBound(parts) To UBound(parts)
+        s = GetStandardKey(parts(i))
+        If Len(s) > 0 Then
+            If Not mLookupPhraseSet.Exists(s) Then Exit Function
         End If
     Next i
-    
-    ' If it finishes the loop without a match, it's truly invalid
-    IsValidOutputList = False
+
+    IsValidOutputList = True
 End Function
-          
+
 Private Sub DoMatchingAndAttachDropDowns()
     Dim wsInput As Worksheet, wsLookup As Worksheet
     Dim lastInputRow As Long
@@ -324,18 +302,18 @@ Private Sub DoMatchingAndAttachDropDowns()
     Dim outVals() As Variant, confVals() As Variant
     Dim inputPhrase As String
     Dim outVal As String, confVal As String
-          
+
     On Error GoTo CleanFail
-    If Not SheetExists("Helper Sheet") Then MsgBox "Helper Sheet not found!", vbCritical: Exit Sub
-    Set wsInput = ThisWorkbook.Worksheets("Helper Sheet")
+    If Not SheetExists(SHEET_HELPER) Then MsgBox "Helper Sheet not found!", vbCritical: Exit Sub
+    Set wsInput = ThisWorkbook.Worksheets(SHEET_HELPER)
     Set wsLookup = GetLookupSheet()
     If wsLookup Is Nothing Then MsgBox "Lookup Sheet not found!": Exit Sub
-          
+
     lastInputRow = wsInput.Cells(wsInput.Rows.count, "A").End(xlUp).Row
     If lastInputRow < 2 Then MsgBox "No data found.", vbInformation: Exit Sub
-          
+
     CleanupOrphanedPickLists
-          
+
     inputArr = wsInput.Range("A2:A" & lastInputRow).Value
     If Not IsArray(inputArr) Then
         Dim tempArr() As Variant
@@ -344,17 +322,17 @@ Private Sub DoMatchingAndAttachDropDowns()
         inputArr = tempArr
     End If
     InitializeMatcher wsLookup
-          
+
     With Application
         .ScreenUpdating = False
         .Calculation = xlCalculationManual
         .EnableEvents = False
     End With
-          
+
     n = UBound(inputArr, 1)
     ReDim outVals(1 To n, 1 To 1)
     ReDim confVals(1 To n, 1 To 1)
-          
+
     For i = 1 To n
         If Not IsError(inputArr(i, 1)) Then
             inputPhrase = CStr(inputArr(i, 1))
@@ -366,15 +344,15 @@ Private Sub DoMatchingAndAttachDropDowns()
             confVals(i, 1) = "Error"
         End If
     Next i
-          
+
     With wsInput
         .Range("B2").Resize(n, 1).Value = outVals
         .Range("C2").Resize(n, 1).Value = confVals
         .Range("B2").Resize(n, 1).WrapText = True
     End With
-          
+
     CreateSelectionListsForColumnB wsInput, n
-          
+
 CleanExit:
     With Application
         .ScreenUpdating = True
@@ -387,27 +365,21 @@ CleanFail:
     MsgBox "Error in DoMatchingAndAttachDropDowns (Row " & i & "): " & Err.Description, vbCritical
     Resume CleanExit
 End Sub
-          
+
 Private Function GetLookupSheet() As Worksheet
     On Error Resume Next
-    Set GetLookupSheet = ThisWorkbook.Worksheets("Uniformat RS Means Lookup")
+    Set GetLookupSheet = ThisWorkbook.Worksheets(SHEET_LOOKUP)
     On Error GoTo 0
 End Function
-          
-' ==========================================================
-' UPDATED: SheetExists (Properly resetting the error handler)
-' ==========================================================
+
 Private Function SheetExists(ByVal sheetName As String) As Boolean
     Dim ws As Worksheet
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(sheetName)
     On Error GoTo 0
-    SheetExists = Not (ws Is Nothing)
+    SheetExists = Not ws Is Nothing
 End Function
-          
-' ==========================================================
-' UPDATED: GetBestMatchForInput (With self-contained Static Dictionary cache)
-' ==========================================================
+
 Private Sub GetBestMatchForInput(ByVal rawInput As String, ByRef outVal As String, ByRef confVal As String)
     Dim normalizedInput As String
     Dim filteredInput As String
@@ -415,82 +387,85 @@ Private Sub GetBestMatchForInput(ByVal rawInput As String, ByRef outVal As Strin
     Dim sNorm As String
     Dim inputWords() As String
     Dim inputSig As String
-               
-    outVal = "": confVal = ""
-               
+
+    outVal = vbNullString: confVal = vbNullString
+
+    LoadLearnedOverrides
+
     cleanRaw = GetStandardKey(rawInput)
     If Len(cleanRaw) = 0 Then
         outVal = "Blank Input": confVal = "none"
         Exit Sub
     End If
-               
+
     normalizedInput = NormalizeAndAlias(rawInput, mAliasDict)
     filteredInput = GetFilteredInput(normalizedInput)
-       
+
     If Len(filteredInput) = 0 Then
         outVal = "No matching words": confVal = "none"
         Exit Sub
     End If
-   
+
     normalizedInput = SubstituteLearnedPhrases(normalizedInput)
     sNorm = " " & LCase$(normalizedInput) & " "
-               
+
     If IsNonAssetInput(sNorm) Then
-        outVal = "": confVal = "excluded"
+        outVal = vbNullString: confVal = "excluded"
         Exit Sub
     End If
-  
+
+    ' -------------------------------------------------------------------------
     ' PRIORITY 1: RULES SHEET (Forced Lists) - MOVED TO TOP!
+    ' -------------------------------------------------------------------------
     If CheckRulesMatch(cleanRaw, normalizedInput, outVal, confVal) Then Exit Sub
-    
-    ' PRIORITY 2: EXACT LOOKUP MATCH
+
+    ' -------------------------------------------------------------------------
+    ' PRIORITY 2: EXACT LOOKUP MATCH (Restored)
+    ' -------------------------------------------------------------------------
     If CheckExactLookupMatch(rawInput, normalizedInput, outVal, confVal) Then Exit Sub
- 
-    ' PRIORITY 0: PUMP DEFAULT LOGIC (Optimized with Static Cache)
+
+    ' -------------------------------------------------------------------------
+    ' PRIORITY 0: PUMP DEFAULT LOGIC
+    ' -------------------------------------------------------------------------
     Dim sPad As String
     sPad = " " & normalizedInput & " "
-       
+
     If InStr(1, sPad, " pump ", vbTextCompare) > 0 Then
-        
-        ' Static variables remember their value between function calls
-        Static sPumpTypes As Object
-        Dim ptKey As Variant, isSpecificPump As Boolean
-        
-        ' Build the cache only once on the very first pump it sees
-        If sPumpTypes Is Nothing Then
-            Set sPumpTypes = CreateObject("Scripting.Dictionary")
-            Dim pTypes As Variant, pt As Variant
-            pTypes = Array("sump", "submersible", "fuel", "condensate", "hydraulic", _
+        Dim pumpTypes As Variant, pType As Variant, isSpecificPump As Boolean
+
+        pumpTypes = Array("sump", "submersible", "fuel", "condensate", "hydraulic", _
                           "fire", "well", "ejector", "metering", "vacuum", _
                           "sewage", "lift", "jockey", "booster", "rotary", _
                           "centrifugal", "circ", "circulation", "dosing", "chem")
-            For Each pt In pTypes
-                sPumpTypes(" " & pt & " ") = True
-            Next pt
-        End If
-           
+
         isSpecificPump = False
-        For Each ptKey In sPumpTypes.keys
-            If InStr(1, sPad, CStr(ptKey), vbTextCompare) > 0 Then
+        For Each pType In pumpTypes
+            If InStr(1, sPad, " " & pType & " ", vbTextCompare) > 0 Then
                 isSpecificPump = True
                 Exit For
             End If
-        Next ptKey
-           
+        Next pType
+
         If Not isSpecificPump Then
             outVal = "Centrifugal Pump"
             confVal = "Default Logic"
             Exit Sub
         End If
     End If
-  
+
+    ' -------------------------------------------------------------------------
     ' PRIORITY 3: LEARNED OVERRIDES
+    ' -------------------------------------------------------------------------
     If TryLearnedOverride(normalizedInput, outVal, confVal) Then Exit Sub
-           
+
+    ' -------------------------------------------------------------------------
     ' PRIORITY 4: MULTI-WORD PHRASE MATCH
+    ' -------------------------------------------------------------------------
     If CheckMultiWordPhraseMatch(filteredInput, outVal, confVal) Then Exit Sub
-           
+
+    ' -------------------------------------------------------------------------
     ' PRIORITY 4.5 & 4.6: SIGNATURE MATCHES
+    ' -------------------------------------------------------------------------
     inputSig = GetCanonicalSignature(normalizedInput)
     If Len(inputSig) > 0 Then
         If mSignatureDict.Exists(inputSig) Then
@@ -499,7 +474,7 @@ Private Sub GetBestMatchForInput(ByVal rawInput As String, ByRef outVal As Strin
             Exit Sub
         End If
     End If
-              
+
     inputSig = GetVocabSignature(normalizedInput)
     If Len(inputSig) > 0 Then
         If mSignatureDict.Exists(inputSig) Then
@@ -508,22 +483,24 @@ Private Sub GetBestMatchForInput(ByVal rawInput As String, ByRef outVal As Strin
             Exit Sub
         End If
     End If
-           
+
+    ' -------------------------------------------------------------------------
     ' PRIORITY 5: ONE-WORD PHRASE MATCH
+    ' -------------------------------------------------------------------------
     If CheckOneWordPhraseMatch(filteredInput, outVal, confVal) Then Exit Sub
-               
+
+    ' -------------------------------------------------------------------------
     ' PRIORITY 6: FUZZY SCORING (Best Guess)
+    ' -------------------------------------------------------------------------
     inputWords = Tokenize(normalizedInput)
     If IsEmptyArray(inputWords) Then
         outVal = "No input": confVal = "none"
     Else
-        ' MatchOneRow normalizedInput, inputWords, outVal, confVal
-        outVal = "No good match"
-        confVal = "Requires AI"
+        MatchOneRow normalizedInput, inputWords, outVal, confVal
     End If
 End Sub
 
-          
+
 Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As String, _
                         ByRef outVal As String, ByRef confVal As String)
     Dim bestScore As Double, confidence As String
@@ -531,30 +508,35 @@ Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As S
     Dim topScore() As Double
     ReDim topPhrase(1 To 3)
     ReDim topScore(1 To 3)
-              
+
     Dim i As Long
     Dim constructedWords() As String
     Dim constructedPhrase As String
     Dim cwCount As Long
-              
+
     cwCount = 0
     ReDim constructedWords(0 To UBound(inputWords))
-          
+
     ' =========================================================
     ' PATTERN CONSTRUCTION LOGIC
     ' =========================================================
     For i = LBound(inputWords) To UBound(inputWords)
         Dim w As String: w = LCase$(Trim$(inputWords(i)))
-                
+
         If mTokenIndex.Exists(w) Then
             constructedWords(cwCount) = w
             cwCount = cwCount + 1
-        ' Else
-            ' TYPO WATCHDOG REMOVED HERE
-            ' Unrecognized words are permanently discarded
+        Else
+            ' TYPO WATCHDOG
+            Dim correctedWord As String
+            correctedWord = FindClosestVocabMatch(w)
+            If Len(correctedWord) > 0 Then
+                constructedWords(cwCount) = correctedWord
+                cwCount = cwCount + 1
+            End If
         End If
     Next i
-              
+
     Dim finalInputWords() As String
     If cwCount > 0 Then
         ReDim Preserve constructedWords(0 To cwCount - 1)
@@ -564,21 +546,21 @@ Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As S
         finalInputWords = inputWords
         constructedPhrase = normalizedInput
     End If
-          
+
     ' =========================================================
     ' FILTERING & TOKENIZATION (UPDATED: UNIQUE ONLY)
     ' =========================================================
     Dim inputSet As Object: Set inputSet = CreateObject("Scripting.Dictionary")
     Dim filteredWords() As String
     Dim fwCount As Long, ww As String
-              
+
     ReDim filteredWords(0 To UBound(finalInputWords))
     fwCount = 0
-      
+
     ' NEW: De-Duplication Dictionary
     Dim seenDict As Object
     Set seenDict = CreateObject("Scripting.Dictionary")
-      
+
     For i = LBound(finalInputWords) To UBound(finalInputWords)
         ww = LCase$(Trim$(finalInputWords(i)))
         If ww <> "" Then
@@ -587,7 +569,7 @@ Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As S
                 If IsMeaningfulToken(ww, mStopWords) Then
                     If IsAllAlphaNum(ww) Then
                         If Not IsTagLike(ww) Then
-                              
+
                              ' Apply the Strict Filter we discussed earlier
                              If IsAllowedScoringToken(ww) Then
                                 filteredWords(fwCount) = ww
@@ -600,14 +582,14 @@ Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As S
             End If
         End If
     Next i
-      
+
     If fwCount = 0 Then
         outVal = "No good match": confVal = "none"
         Exit Sub
     Else
         ReDim Preserve filteredWords(0 To fwCount - 1)
     End If
-          
+
     Dim inputTotalWeight As Double: inputTotalWeight = 0#
     Dim iw As Double
     For i = LBound(filteredWords) To UBound(filteredWords)
@@ -618,18 +600,18 @@ Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As S
         End If
         inputTotalWeight = inputTotalWeight + iw
     Next i
-          
+
     Dim mustTokens As Object: Set mustTokens = ExtractCoreTokens(filteredWords, mCoreSet)
     Dim qualTokens As Object: Set qualTokens = ExtractQualifierTokens(filteredWords, mQualSet)
     Dim forceCategory As String: forceCategory = InferForcedCategory(constructedPhrase)
-      
+
     ' Infer Subject and Category for Semantic Weighting
     Dim inputSubject As String: inputSubject = GetInputSubject(filteredWords)
     Dim inputCategory As String: inputCategory = ""
     If fwCount > 0 Then
         inputCategory = GetBestCategory(filteredWords)
     End If
-          
+
     ' =========================================================
     ' CANDIDATE SEARCH
     ' =========================================================
@@ -644,51 +626,51 @@ Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As S
             Next v
         End If
     Next i
-       
+
     If candIDs.count = 0 Then
         For i = 1 To mLookupCount: candIDs(i) = True: Next i
     End If
-       
+
     bestScore = 0#: confidence = ""
     Dim id As Variant
-              
+
     ' =========================================================
     ' SCORING LOOP
     ' =========================================================
     For Each id In candIDs.keys
         Dim d As Object: Set d = mLookupDicts(id)
-                  
+
         If Not ContainsAllTokens(d, mustTokens) Then GoTo NextCand
         ' PROPOSED (Bonus-based):
         ' Don't skip candidates just because they miss a qualifier.
         ' Instead, calculate the penalty later in the scoring section.
         Dim qualMatchCount As Long
         qualMatchCount = GetMeaningfulOverlapCount(candIDs, qualTokens, mStopWords)
-         
+
         If Len(forceCategory) > 0 Then
             If Not CandidateContainsCategory(d, forceCategory) Then GoTo NextCand
         End If
-          
+
         Dim matchedCnt As Long
         Dim s As Double
-           
+
         ' F1 Overlap Score
         s = CalculateOverlapScoreF1(inputSet, mLookupWords(id), mStopWords, mTokenWeights, inputTotalWeight, matchedCnt)
-           
+
         If s > 0 Then
             ' Bigram Bonus
             Dim bigramSim As Double
             bigramSim = GetBigramSimilarity(filteredWords, mLookupWords(id))
             If bigramSim > 0 Then s = s * (1 + (bigramSim * 0.2))
-               
+
             ' SEMANTIC LOGIC (Category and Subject alignment)
             Dim semBoost As Double: semBoost = 0#
-               
+
             ' 1. Category Match
             If Len(inputCategory) > 0 Then
                 If LCase$(mRowCategory(id)) = inputCategory Then semBoost = semBoost + 0.1
             End If
-               
+
             ' 2. Subject Match (Head Noun) - UPDATED WITH PENALTY
             If Len(inputSubject) > 0 Then
                 Dim lookupSubj As String: lookupSubj = mLookupSubjects(id)
@@ -707,7 +689,7 @@ Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As S
             End If
             s = s + semBoost
         End If
-          
+
         ' Check Match Thresholds
         If s >= MIN_MATCH_THRESHOLD Then
             Dim ov As Long: ov = GetMeaningfulOverlapCount(inputSet, mLookupWords(id), mStopWords)
@@ -728,14 +710,14 @@ Private Sub MatchOneRow(ByVal normalizedInput As String, ByRef inputWords() As S
             End If
             InsertTop3 topPhrase, topScore, mLookupPhrases(id), s
         End If
-           
+
         If s > bestScore Then
             bestScore = s
             confidence = "Fuzzy (" & Format(s, "0.0") & ")"
         End If
 NextCand:
     Next id
-              
+
     ' =========================================================
     ' FINAL OUTPUT GENERATION
     ' =========================================================
@@ -745,12 +727,12 @@ NextCand:
     Else
         collapseToSingle = ShouldCollapseToSingle(topScore)
     End If
-              
+
     Dim resultStr As String: resultStr = JoinNonEmpty(topPhrase, vbLf)
     If resultStr = "" Then
         Dim fallbackCat As String
         fallbackCat = GetBestCategory(filteredWords)
-         
+
         ' NEW: Only show the category list if it contains 6 or fewer items
         If Len(fallbackCat) > 0 Then
             If mCategoryDict(fallbackCat).count > 6 Then
@@ -770,39 +752,39 @@ End Sub
 ' ==========================================================
 ' MASTER MATCHER MODULE - PART 2 of 3
 ' ==========================================================
-          
+
 ' NEW SCORING FUNCTION: F1 Score (Harmonic Mean)
 Public Function CalculateOverlapScoreF1(ByVal inputSet As Object, ByVal lookupWords As Variant, ByVal stopWords As Object, ByVal tokenWeights As Object, ByVal inputTotalWeight As Double, Optional ByRef matchedCountOut As Long) As Double
     Dim i As Long, matchedCount As Long, totalCount As Long, w As String
     Dim inputKey As Variant
     Dim matchedWeight As Double, targetTotalWeight As Double
     Dim tw As Double
-              
+
     matchedCountOut = 0
     If IsEmptyArray(lookupWords) Then CalculateOverlapScoreF1 = 0#: Exit Function
     If inputTotalWeight <= 0 Then CalculateOverlapScoreF1 = 0#: Exit Function
-          
+
     On Error GoTo EH
     matchedCount = 0: totalCount = 0
     matchedWeight = 0#
     targetTotalWeight = 0#
-              
+
     For i = LBound(lookupWords) To UBound(lookupWords)
         w = Trim$(lookupWords(i))
         If IsMeaningfulToken(w, stopWords) Then
             totalCount = totalCount + 1
-                      
+
             tw = 1#
             If Not tokenWeights Is Nothing Then
                 If tokenWeights.Exists(w) Then tw = CDbl(tokenWeights(w))
             End If
-                      
+
             targetTotalWeight = targetTotalWeight + tw
-                      
+
             Dim found As Boolean: found = False
             Dim sim As Double: sim = 0#
             Dim bestSim As Double: bestSim = 0#
-                      
+
             If inputSet.Exists(w) Then
                 found = True
                 sim = 1#
@@ -815,41 +797,37 @@ Public Function CalculateOverlapScoreF1(ByVal inputSet As Object, ByVal lookupWo
                 sim = bestSim
                 If sim > 0 Then found = True
             End If
-                      
+
             If found Then
                 matchedCount = matchedCount + 1
                 matchedWeight = matchedWeight + (tw * sim)
             End If
         End If
     Next i
-              
+
     matchedCountOut = matchedCount
-       
+
     If matchedWeight = 0 Then CalculateOverlapScoreF1 = 0#: Exit Function
-       
+
     ' F1 Score Calculation
     Dim precision As Double
     Dim recall As Double
-       
+
     precision = matchedWeight / inputTotalWeight
     recall = matchedWeight / targetTotalWeight
-       
+
     If (precision + recall) > 0 Then
         CalculateOverlapScoreF1 = 2 * (precision * recall) / (precision + recall)
     Else
         CalculateOverlapScoreF1 = 0#
     End If
-       
+
     Exit Function
 EH: CalculateOverlapScoreF1 = 0#
 End Function
-          
-' ==========================================================
-' UPDATED: InitializeMatcher (Reverted to original since we cache pumps elsewhere now)
-' ==========================================================
+
 Private Sub InitializeMatcher(wsLookup As Worksheet)
-    MIN_MATCH_THRESHOLD = 0.5
-    mLearnedLoaded = False ' Force reload of learned data
+        mLearnedLoaded = False ' Force reload of learned data
     If mRegEx Is Nothing Then
         Set mRegEx = CreateObject("VBScript.RegExp")
         With mRegEx
@@ -861,7 +839,7 @@ Private Sub InitializeMatcher(wsLookup As Worksheet)
     EnsureDictionaries
     BuildLookupCache wsLookup
 End Sub
-          
+
 Private Function CheckExactLookupMatch(ByVal rawInput As String, ByVal normInput As String, ByRef outVal As String, ByRef confVal As String) As Boolean
     If mLookupPhraseSet Is Nothing Then Exit Function
     Dim scrubbedRaw As String, scrubbedNorm As String
@@ -880,18 +858,18 @@ Private Function CheckExactLookupMatch(ByVal rawInput As String, ByVal normInput
         Exit Function
     End If
 End Function
-          
+
 Private Function CheckRulesMatch(ByVal rawInput As String, ByVal normInput As String, ByRef outVal As String, ByRef confVal As String) As Boolean
     Dim sNorm As String, sRaw As String
     Dim key As Variant, otherKey As Variant
     Dim matchKeys As Object, finalResults As Object
     Dim isSubset As Boolean
-              
+
     If mForcedOutputDict Is Nothing Then
         CheckRulesMatch = False
         Exit Function
     End If
-              
+
     ' --- NEW: Priority Check for Exact Learned Overrides ---
     ' Before we apply generic rules (like "Pump" -> "Centrifugal"),
     ' check if the user has explicitly overridden this exact phrase.
@@ -907,7 +885,7 @@ Private Function CheckRulesMatch(ByVal rawInput As String, ByVal normInput As St
 
     Set matchKeys = CreateObject("Scripting.Dictionary")
     Set finalResults = CreateObject("Scripting.Dictionary")
-              
+
     ' Strip hyphens and slashes so tags like "DHWT-2" become "DHWT 2"
     sRaw = " " & GetStandardKey(rawInput) & " "
     sRaw = Replace(sRaw, "-", " ")
@@ -915,9 +893,9 @@ Private Function CheckRulesMatch(ByVal rawInput As String, ByVal normInput As St
     sRaw = Replace(sRaw, "/", " ")
     sRaw = Application.WorksheetFunction.Trim(sRaw)
     sRaw = " " & sRaw & " "
-     
+
     sNorm = " " & normInput & " "
-              
+
     ' 1. Find ALL potential rule keys that exist in the input
     For Each key In mForcedOutputDict.keys
         If InStr(1, sNorm, " " & key & " ", vbTextCompare) > 0 Or _
@@ -925,11 +903,11 @@ Private Function CheckRulesMatch(ByVal rawInput As String, ByVal normInput As St
             matchKeys(CStr(key)) = True
         End If
     Next key
- 
+
     ' 2. Filter out shorter matches that are actually part of longer matches
     For Each key In matchKeys.keys
         isSubset = False
-     
+
         For Each otherKey In matchKeys.keys
             If key <> otherKey Then
                 If InStr(1, " " & otherKey & " ", " " & key & " ", vbTextCompare) > 0 Then
@@ -938,35 +916,31 @@ Private Function CheckRulesMatch(ByVal rawInput As String, ByVal normInput As St
                 End If
             End If
         Next otherKey
-                  
+
         If Not isSubset Then
             Dim parts() As String, i As Long
             Dim ruleOutput As String
-               
+
             If Not IsNull(mForcedOutputDict(key)) Then
                 ruleOutput = CStr(mForcedOutputDict(key))
                 parts = Split(ruleOutput, vbLf)
-                        
+
                 For i = LBound(parts) To UBound(parts)
                     If Len(Trim$(parts(i))) > 0 Then finalResults(Trim$(parts(i))) = True
                 Next i
             End If
         End If
     Next key
-       
+
     ' 3. Output the combined unique results
     If finalResults.count > 0 Then
-         
+
         ' --- NEW: Memory Check Before Applying Generic Rule List ---
         Dim ruleSig As String
         ruleSig = BuildLearnSignature(normInput)
         If Len(ruleSig) > 0 Then
             If Not mLearnedSigBest Is Nothing Then
                 If mLearnedSigBest.Exists(ruleSig) Then
-                    ' ADD THIS DIAGNOSTIC MESSAGE BOX
-                    ' MsgBox "The Engine thinks '" & normInput & "' has a signature of: [" & ruleSig & "]" & vbCrLf & _
-                           ' "It found a learned answer for that signature: [" & mLearnedSigBest(ruleSig) & "]", vbInformation, "Diagnostic Mode"
-                           
                     outVal = SanitizeLearnedOutput(mLearnedSigBest(ruleSig))
                     confVal = "Rule Hit (Learned Override)"
                     CheckRulesMatch = True
@@ -975,7 +949,7 @@ Private Function CheckRulesMatch(ByVal rawInput As String, ByVal normInput As St
             End If
         End If
         ' -----------------------------------------------------------
-         
+
         outVal = Join(finalResults.keys, vbLf)
         If finalResults.count = 1 Then
             confVal = "Rule Hit"
@@ -985,7 +959,7 @@ Private Function CheckRulesMatch(ByVal rawInput As String, ByVal normInput As St
         CheckRulesMatch = True
         Exit Function
     End If
-          
+
     CheckRulesMatch = False
 End Function
 Private Function CheckCategoryMatch(ByVal normInput As String, ByRef outVal As String, ByRef confVal As String) As Boolean
@@ -1012,7 +986,7 @@ Private Function CheckCategoryMatch(ByVal normInput As String, ByRef outVal As S
     End If
     CheckCategoryMatch = False
 End Function
-          
+
 Private Function CheckOneWordPhraseMatch(ByVal filteredInput As String, ByRef outVal As String, ByRef confVal As String) As Boolean
     Dim j As Long
     Dim sInput As String
@@ -1035,7 +1009,7 @@ Private Function CheckOneWordPhraseMatch(ByVal filteredInput As String, ByRef ou
     Next j
     CheckOneWordPhraseMatch = False
 End Function
-          
+
 Private Function CheckMultiWordPhraseMatch(ByVal filteredInput As String, ByRef outVal As String, ByRef confVal As String) As Boolean
     Dim j As Long
     Dim sInput As String
@@ -1067,7 +1041,7 @@ Private Function CheckMultiWordPhraseMatch(ByVal filteredInput As String, ByRef 
     End If
     CheckMultiWordPhraseMatch = False
 End Function
-          
+
 Private Function GetBestCategory(ByRef inputWords() As String) As String
     Dim i As Long, t As String
     Dim catScores As Object
@@ -1103,7 +1077,7 @@ Private Function GetBestCategory(ByRef inputWords() As String) As String
     Next cat
     If bestScore >= 0.5 Then GetBestCategory = bestCat
 End Function
-          
+
 Private Function IsNonAssetInput(ByVal sNorm As String) As Boolean
     Dim badWords As Variant, bw As Variant
     ' Expanded list to include procedural actions that aren't physical assets
@@ -1111,7 +1085,7 @@ Private Function IsNonAssetInput(ByVal sNorm As String) As Boolean
                      " maintenance plan ", " emergency response ", " invoice ", " permit ", _
                      " warranty ", " fee ", " tax ", " meeting ", " verify ", " check ", _
                      " inspect ", " travel ", " quote ", " discuss ", " review ")
-       
+
     For Each bw In badWords
         If InStr(1, sNorm, CStr(bw), vbTextCompare) > 0 Then
             IsNonAssetInput = True
@@ -1120,48 +1094,20 @@ Private Function IsNonAssetInput(ByVal sNorm As String) As Boolean
     Next bw
     IsNonAssetInput = False
 End Function
-          
-' ==========================================================
-' UPDATED: The Ultimate Cleaner (PURE VBA - No WorksheetFunctions)
-' ==========================================================
+
 Public Function GetStandardKey(ByVal txt As String) As String
     Dim s As String
     s = LCase$(txt)
-    
-    ' Standard whitespace normalizers
     s = Replace(s, Chr(160), " ")
     s = Replace(s, Chr(9), " ")
     s = Replace(s, Chr(10), " ")
     s = Replace(s, Chr(13), " ")
     s = Replace(s, Chr(173), "")
     s = Replace(s, vbTab, " ")
-    
-    ' Aggressive Invisible Character Cleaning
-    s = Replace(s, ChrW(8203), "")  ' Zero width space
-    s = Replace(s, ChrW(8204), "")  ' Zero width non-joiner
-    s = Replace(s, ChrW(8205), "")  ' Zero width joiner
-    s = Replace(s, ChrW(65279), "") ' Byte order mark
-    
-    ' Pure VBA Clean (Remove unprintable ASCII characters 0-31)
-    Dim i As Long
-    For i = 0 To 31
-        If i <> 10 And i <> 13 Then s = Replace(s, Chr(i), "")
-    Next i
-    
-    ' Strip enclosing quotes if they accidentally got copied
-    If Left$(s, 1) = """" And Right$(s, 1) = """" And Len(s) >= 2 Then
-        s = Mid$(s, 2, Len(s) - 2)
-    End If
-    
-    ' Pure VBA Trim and Double-Space removal
-    s = Trim$(s)
-    Do While InStr(s, "  ") > 0
-        s = Replace(s, "  ", " ")
-    Loop
-    
+    s = Application.WorksheetFunction.Trim(s)
     GetStandardKey = s
 End Function
-          
+
 Public Function GetFilteredInput(ByVal normInput As String) As String
     Dim tokens() As String, out() As String
     Dim i As Long, count As Long
@@ -1188,23 +1134,28 @@ Public Function GetFilteredInput(ByVal normInput As String) As String
         GetFilteredInput = Join(out, " ")
     End If
 End Function
-          
-' ==========================================================
-' UPDATED: Tokenize (Optimized by skipping redundant loops)
-' ==========================================================
+
 Public Function Tokenize(ByVal text As String) As String()
-    ' Since text is already pre-trimmed of double spaces in NormalizeAndAlias,
-    ' Split() will return a clean array with no empty tokens.
-    ' We can bypass the loop entirely for a significant performance boost.
-    
-    If Len(Trim$(text)) = 0 Then
+    Dim parts() As String, tmp() As String, i As Long, count As Long
+    parts = Split(text, " ")
+    If UBound(parts) = -1 Then
         Tokenize = Split(vbNullString, " ")
         Exit Function
     End If
-    
-    Tokenize = Split(text, " ")
+    ReDim tmp(0 To UBound(parts))
+    count = 0
+    For i = LBound(parts) To UBound(parts)
+        If Trim$(parts(i)) <> "" Then tmp(count) = Trim$(parts(i)): count = count + 1
+    Next i
+    If count = 0 Then
+        ReDim tmp(0)
+        Tokenize = Split("", " ")
+    Else
+        ReDim Preserve tmp(0 To count - 1)
+        Tokenize = tmp
+    End If
 End Function
-          
+
 Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Object) As String
     Dim t As String, key As Variant
     t = LCase$(text)
@@ -1217,7 +1168,7 @@ Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Objec
     t = Replace(t, "]", " ")
     t = Replace(t, "{", " ")
     t = Replace(t, "}", " ")
-             
+
     If mRegEx Is Nothing Then
         Set mRegEx = CreateObject("VBScript.RegExp")
         With mRegEx
@@ -1225,7 +1176,7 @@ Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Objec
             .IgnoreCase = True
         End With
     End If
-             
+
     With mRegEx
         .Pattern = "(\d)x(\d)"
         If .Test(t) Then t = .Replace(t, "$1 x $2")
@@ -1234,21 +1185,21 @@ Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Objec
         .Pattern = "(\d)([a-z])"
         If .Test(t) Then t = .Replace(t, "$1 $2")
     End With
-             
+
     t = Replace(t, "/", " / ")
     t = Replace(t, ",", " ")
     t = Replace(t, ";", " ")
     t = Replace(t, "-", " ")
     t = Replace(t, "_", " ")
     t = Application.WorksheetFunction.Trim(t)
-       
+
     If Not mPhraseMap Is Nothing Then
         For Each key In mPhraseMap.keys
             t = ReplaceWordish(t, CStr(key), CStr(mPhraseMap(key)))
         Next key
         t = Application.WorksheetFunction.Trim(t)
     End If
-   
+
     ' --- NEW: SUFFIX STEMMING LOGIC ---
     Dim stemArr() As String, sIdx As Long
     stemArr = Split(t, " ")
@@ -1264,23 +1215,23 @@ Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Objec
     Next sIdx
     t = Join(stemArr, " ")
     ' ----------------------------------
-   
+
     ' Standard replacements moved to EnsureDictionaries (mAliasDict defaults)
-   
+
     If Not aliasDict Is Nothing Then
         For Each key In aliasDict.keys
             t = ReplaceWordish(t, CStr(key), CStr(aliasDict(key)))
         Next key
         t = Application.WorksheetFunction.Trim(t)
     End If
-        
+
     ' STRICT ALPHA-ONLY FILTER
     With mRegEx
         .Pattern = "[^a-z ]"
         t = .Replace(t, " ")
     End With
     t = Application.WorksheetFunction.Trim(t)
-        
+
     Dim parts() As String, out() As String, i As Long, tok As String, n As Long
     parts = Split(t, " ")
     ReDim out(0 To UBound(parts))
@@ -1298,17 +1249,17 @@ Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Objec
         End If
 NextToken:
     Next i
-       
+
     If n = 0 Then NormalizeAndAlias = "" Else ReDim Preserve out(0 To n - 1): NormalizeAndAlias = Join(out, " ")
 End Function
-          
+
 Private Function ReplaceWordish(ByVal text As String, ByVal findWhat As String, ByVal replaceWith As String) As String
     Dim padded As String
     padded = " " & text & " "
     padded = Replace$(padded, " " & findWhat & " ", IIf(replaceWith = "", " ", " " & replaceWith & " "))
     ReplaceWordish = Application.WorksheetFunction.Trim(padded)
 End Function
-          
+
 Private Function Levenshtein(ByVal s1 As String, ByVal s2 As String) As Long
     Dim i As Long, j As Long
     Dim l1 As Long, l2 As Long
@@ -1339,7 +1290,7 @@ Private Function Levenshtein(ByVal s1 As String, ByVal s2 As String) As Long
     Next i
     Levenshtein = d(l1, l2)
 End Function
-          
+
 Private Function IsFuzzyMatch(ByVal w1 As String, ByVal w2 As String) As Boolean
     If w1 = w2 Then IsFuzzyMatch = True: Exit Function
     Dim l1 As Long, l2 As Long
@@ -1354,26 +1305,26 @@ Private Function IsFuzzyMatch(ByVal w1 As String, ByVal w2 As String) As Boolean
         If dist <= 2 Then IsFuzzyMatch = True
     End If
 End Function
-         
+
 Private Function GetFuzzySimilarity(ByVal w1 As String, ByVal w2 As String) As Double
     If w1 = w2 Then GetFuzzySimilarity = 1#: Exit Function
-             
+
     Dim l1 As Long, l2 As Long
     l1 = Len(w1): l2 = Len(w2)
-             
+
     If l1 < 3 Or l2 < 3 Then GetFuzzySimilarity = 0#: Exit Function
-             
+
     Dim maxDist As Long
     If l1 <= 5 Then maxDist = 1 Else maxDist = 2
-             
+
     If Abs(l1 - l2) > maxDist Then GetFuzzySimilarity = 0#: Exit Function
-             
+
     ' Heuristic: First char match for short words
     If (l1 = 3 Or l2 = 3) And Left$(w1, 1) <> Left$(w2, 1) Then GetFuzzySimilarity = 0#: Exit Function
-         
+
     Dim dist As Long
     dist = Levenshtein(w1, w2)
-             
+
     If dist <= maxDist Then
         Dim maxLen As Long
         If l1 > l2 Then maxLen = l1 Else maxLen = l2
@@ -1382,7 +1333,7 @@ Private Function GetFuzzySimilarity(ByVal w1 As String, ByVal w2 As String) As D
         GetFuzzySimilarity = 0#
     End If
 End Function
-          
+
 Private Function GetConsecutiveMatchCount(ByVal inputWords As Variant, ByVal lookupWords As Variant) As Long
     Dim maxLen As Long
     Dim currentLen As Long
@@ -1414,7 +1365,7 @@ Private Function GetConsecutiveMatchCount(ByVal inputWords As Variant, ByVal loo
     Next i
     GetConsecutiveMatchCount = maxLen
 End Function
-          
+
 Private Function IsMeaningfulToken(ByVal w As String, ByVal stopWords As Object) As Boolean
     w = LCase$(Trim$(w))
     If w = "" Then IsMeaningfulToken = False: Exit Function
@@ -1422,22 +1373,22 @@ Private Function IsMeaningfulToken(ByVal w As String, ByVal stopWords As Object)
     If Len(w) <= 1 Then IsMeaningfulToken = False: Exit Function
     IsMeaningfulToken = True
 End Function
-          
+
 Private Function IsAllowedLearnToken(ByVal tok As String) As Boolean
     If mLookupVocab Is Nothing Then IsAllowedLearnToken = False: Exit Function
     IsAllowedLearnToken = mLookupVocab.Exists(tok)
 End Function
-          
+
 Private Function IsAllowedScoringToken(ByVal tok As String) As Boolean
     ' STRICT MODE:
     ' Only allow words that explicitly exist in the lookup vocabulary.
     ' If "Sector" is not in the lookup data, it returns False and is discarded.
-      
+
     If mLookupVocab Is Nothing Then
         IsAllowedScoringToken = False
         Exit Function
     End If
-  
+
     If mLookupVocab.Exists(tok) Then
         IsAllowedScoringToken = True
     Else
@@ -1446,18 +1397,19 @@ Private Function IsAllowedScoringToken(ByVal tok As String) As Boolean
         IsAllowedScoringToken = False
     End If
 End Function
-          
+
 Private Function IsAllAlphaNum(ByVal s As String) As Boolean
-    Dim i As Long, ch As Integer
-    s = LCase$(Trim$(s))
     If Len(s) = 0 Then Exit Function
-    For i = 1 To Len(s)
-        ch = Asc(Mid$(s, i, 1))
+    Dim b() As Byte
+    Dim i As Long, ch As Integer
+    b = LCase$(Trim$(s))
+    For i = LBound(b) To UBound(b) Step 2
+        ch = b(i)
         If Not ((ch >= 97 And ch <= 122) Or (ch >= 48 And ch <= 57)) Then IsAllAlphaNum = False: Exit Function
     Next i
     IsAllAlphaNum = True
 End Function
-          
+
 Private Function IsTagLike(ByVal tok As String) As Boolean
     Dim t As String: t = LCase$(Trim$(tok))
     If t = "" Then Exit Function
@@ -1468,21 +1420,24 @@ Private Function IsTagLike(ByVal tok As String) As Boolean
         End If
     End If
 End Function
-          
+
 Private Function HasAnyDigit(ByVal s As String) As Boolean
+    Dim b() As Byte
     Dim i As Long, ch As Integer
-    For i = 1 To Len(s)
-        ch = Asc(Mid$(s, i, 1))
+    If Len(s) = 0 Then Exit Function
+    b = s
+    For i = LBound(b) To UBound(b) Step 2
+        ch = b(i)
         If ch >= 48 And ch <= 57 Then HasAnyDigit = True: Exit Function
     Next i
 End Function
-          
+
 Private Function IsAlphaNumTag(ByVal tok As String) As Boolean
     If tok Like "[a-z][0-9]*" Then IsAlphaNumTag = True: Exit Function
     If tok Like "[a-z].[0-9]*" Then IsAlphaNumTag = True: Exit Function
     If tok Like "[a-z]-[0-9]*" Then IsAlphaNumTag = True: Exit Function
 End Function
-          
+
 Private Function GetMeaningfulOverlapCount(ByVal inputSet As Object, ByVal lookupWords As Variant, ByVal stopWords As Object) As Long
     Dim i As Long, w As String, c As Long
     If IsEmptyArray(lookupWords) Then GetMeaningfulOverlapCount = 0: Exit Function
@@ -1492,7 +1447,7 @@ Private Function GetMeaningfulOverlapCount(ByVal inputSet As Object, ByVal looku
     Next i
     GetMeaningfulOverlapCount = c
 End Function
-          
+
 Private Function IsStrongSingleToken(ByVal w As String) As Boolean
     If mCoreSet.Exists(w) Then IsStrongSingleToken = True: Exit Function
     Select Case w
@@ -1501,7 +1456,7 @@ Private Function IsStrongSingleToken(ByVal w As String) As Boolean
     End Select
     IsStrongSingleToken = False
 End Function
-          
+
 Public Function ExtractCoreTokens(ByRef words() As String, ByVal coreSet As Object) As Object
     Dim req As Object: Set req = CreateObject("Scripting.Dictionary")
     Dim i As Long, w As String
@@ -1511,7 +1466,7 @@ Public Function ExtractCoreTokens(ByRef words() As String, ByVal coreSet As Obje
     Next i
     Set ExtractCoreTokens = req
 End Function
-          
+
 Public Function ExtractQualifierTokens(ByRef words() As String, ByVal qualSet As Object) As Object
     Dim req As Object: Set req = CreateObject("Scripting.Dictionary")
     Dim i As Long, w As String
@@ -1521,7 +1476,7 @@ Public Function ExtractQualifierTokens(ByRef words() As String, ByVal qualSet As
     Next i
     Set ExtractQualifierTokens = req
 End Function
-          
+
 Public Function ContainsAllTokens(ByVal candDict As Object, ByVal required As Object) As Boolean
     Dim key As Variant
     If required Is Nothing Then ContainsAllTokens = True: Exit Function
@@ -1531,7 +1486,7 @@ Public Function ContainsAllTokens(ByVal candDict As Object, ByVal required As Ob
     Next key
     ContainsAllTokens = True
 End Function
-          
+
 Public Function IsEmptyArray(arr As Variant) As Boolean
     On Error GoTo EH
     Dim lb As Long, ub As Long
@@ -1540,7 +1495,7 @@ Public Function IsEmptyArray(arr As Variant) As Boolean
     Exit Function
 EH: IsEmptyArray = True
 End Function
-          
+
 Private Function IsDescriptorToken(ByVal tok As String) As Boolean
     Select Case tok
         Case "north", "south", "east", "west", "wing", "wings", "side", "area", "zone", _
@@ -1550,7 +1505,7 @@ Private Function IsDescriptorToken(ByVal tok As String) As Boolean
             IsDescriptorToken = True
     End Select
 End Function
-          
+
 Private Function ShouldCollapseToSingle(ByRef topScore() As Double) As Boolean
     Dim s1 As Double, s2 As Double
     s1 = topScore(1): s2 = topScore(2)
@@ -1558,7 +1513,7 @@ Private Function ShouldCollapseToSingle(ByRef topScore() As Double) As Boolean
     If s1 - s2 >= DOMINANCE_MARGIN Then ShouldCollapseToSingle = True: Exit Function
     ShouldCollapseToSingle = False
 End Function
-          
+
 Private Sub InsertTop3(ByRef topPhrase() As String, ByRef topScore() As Double, ByVal phrase As String, ByVal score As Double)
     Dim i As Long, p As Long
     If PhraseExists(topPhrase, phrase) Then Exit Sub
@@ -1574,7 +1529,7 @@ Private Sub InsertTop3(ByRef topPhrase() As String, ByRef topScore() As Double, 
         End If
     Next i
 End Sub
-          
+
 Private Function PhraseExists(ByRef arr() As String, ByVal s As String) As Boolean
     Dim i As Long
     For i = LBound(arr) To UBound(arr)
@@ -1582,7 +1537,7 @@ Private Function PhraseExists(ByRef arr() As String, ByVal s As String) As Boole
     Next i
     PhraseExists = False
 End Function
-          
+
 Private Function CountNonEmpty(ByRef arr() As String) As Long
     Dim i As Long, c As Long
     For i = LBound(arr) To UBound(arr)
@@ -1590,7 +1545,7 @@ Private Function CountNonEmpty(ByRef arr() As String) As Long
     Next i
     CountNonEmpty = c
 End Function
-          
+
 Private Function JoinNonEmpty(ByRef s() As String, ByVal sep As String) As String
     Dim i As Long, res As String
     For i = LBound(s) To UBound(s)
@@ -1598,7 +1553,7 @@ Private Function JoinNonEmpty(ByRef s() As String, ByVal sep As String) As Strin
     Next i
     JoinNonEmpty = res
 End Function
-          
+
 Private Sub QuickSortStringsAsc(arr() As String, ByVal first As Long, ByVal last As Long)
     Dim i As Long, j As Long, pivot As String, temp As String
     i = first: j = last
@@ -1614,7 +1569,7 @@ Private Sub QuickSortStringsAsc(arr() As String, ByVal first As Long, ByVal last
     If first < j Then QuickSortStringsAsc arr, first, j
     If i < last Then QuickSortStringsAsc arr, i, last
 End Sub
-          
+
 Private Sub QuickSortStringsLengthDesc(arr() As String, ByVal first As Long, ByVal last As Long)
     Dim i As Long, j As Long, pivot As String, temp As String
     i = first: j = last
@@ -1630,7 +1585,7 @@ Private Sub QuickSortStringsLengthDesc(arr() As String, ByVal first As Long, ByV
     If first < j Then QuickSortStringsLengthDesc arr, first, j
     If i < last Then QuickSortStringsLengthDesc arr, i, last
 End Sub
-          
+
 Private Sub BuildCategoryDictionaryFromLookup(ByVal wsLookup As Worksheet)
     Dim lastRow As Long
     lastRow = wsLookup.Cells(wsLookup.Rows.count, "A").End(xlUp).Row
@@ -1685,7 +1640,7 @@ Private Sub BuildCategoryDictionaryFromLookup(ByVal wsLookup As Worksheet)
         Next keyMap
     End If
 End Sub
-          
+
 Private Function InferForcedCategory(ByVal normalizedInput As String) As String
     Dim sNorm As String: sNorm = " " & LCase$(normalizedInput) & " "
     If mLookupVocab Is Nothing Then If Not mTokenIndex Is Nothing Then BuildLookupVocabulary
@@ -1695,7 +1650,7 @@ Private Function InferForcedCategory(ByVal normalizedInput As String) As String
     If InStr(1, sNorm, " fan ", vbTextCompare) > 0 Or InStr(1, sNorm, " exhaust ", vbTextCompare) > 0 Then InferForcedCategory = "fan": Exit Function
     InferForcedCategory = ""
 End Function
-          
+
 Private Function CandidateContainsCategory(ByVal candDict As Object, ByVal categoryName As String) As Boolean
     CandidateContainsCategory = False
     If candDict Is Nothing Then Exit Function
@@ -1703,7 +1658,7 @@ Private Function CandidateContainsCategory(ByVal candDict As Object, ByVal categ
     If Len(catTok) = 0 Then Exit Function
     If candDict.Exists(catTok) Then CandidateContainsCategory = True
 End Function
-          
+
 Private Function GetCategoryItemsList(ByVal catName As String) As String
     Dim res As String
     Dim count As Long
@@ -1723,7 +1678,7 @@ Private Function GetCategoryItemsList(ByVal catName As String) As String
     Next key
     GetCategoryItemsList = res
 End Function
-          
+
 Private Function GetDominantCategory(ByVal token As String) As String
     If mTokenCatFreq Is Nothing Then Exit Function
     If Not mTokenCatFreq.Exists(token) Then Exit Function
@@ -1749,7 +1704,7 @@ Private Function GetDominantCategory(ByVal token As String) As String
     End Select
     If bestProp >= threshold Then GetDominantCategory = bestCat
 End Function
-          
+
 Private Function GetCanonicalSignature(ByVal text As String) As String
     Dim tokens() As String
     Dim i As Long, j As Long, temp As String
@@ -1758,11 +1713,11 @@ Private Function GetCanonicalSignature(ByVal text As String) As String
     Dim clean() As String
     Dim count As Long: count = 0
     ReDim clean(0 To UBound(tokens))
-     
+
     ' NEW: Remove duplicates from the signature
     Dim seen As Object
     Set seen = CreateObject("Scripting.Dictionary")
-     
+
     For i = LBound(tokens) To UBound(tokens)
         If IsMeaningfulToken(tokens(i), mStopWords) Then
             If Not seen.Exists(tokens(i)) Then
@@ -1785,23 +1740,23 @@ Private Function GetCanonicalSignature(ByVal text As String) As String
     Next i
     GetCanonicalSignature = Join(clean, "|")
 End Function
-         
+
 Private Function GetVocabSignature(ByVal text As String) As String
     Dim tokens() As String
     Dim i As Long, j As Long, temp As String
     tokens = Tokenize(NormalizeAndAlias(text, mAliasDict))
     If IsEmptyArray(tokens) Then GetVocabSignature = "": Exit Function
-             
+
     Dim clean() As String
     Dim count As Long: count = 0
     ReDim clean(0 To UBound(tokens))
-             
+
     If mLookupVocab Is Nothing Then Exit Function
-     
+
     ' NEW: Remove duplicates from the signature
     Dim seen As Object
     Set seen = CreateObject("Scripting.Dictionary")
-             
+
     For i = LBound(tokens) To UBound(tokens)
         Dim tok As String: tok = tokens(i)
         If IsMeaningfulToken(tok, mStopWords) Then
@@ -1814,10 +1769,10 @@ Private Function GetVocabSignature(ByVal text As String) As String
             End If
         End If
     Next i
-             
+
     If count = 0 Then GetVocabSignature = "": Exit Function
     ReDim Preserve clean(0 To count - 1)
-             
+
     ' Simple Bubble Sort (for short arrays usually < 10 items)
     For i = LBound(clean) To UBound(clean) - 1
         For j = i + 1 To UBound(clean)
@@ -1828,19 +1783,19 @@ Private Function GetVocabSignature(ByVal text As String) As String
             End If
         Next j
     Next i
-             
+
     GetVocabSignature = Join(clean, "|")
 End Function
-         
+
 ' ==========================================================
 ' MASTER MATCHER MODULE - PART 3 of 3
 ' ==========================================================
-          
-Public Function BuildLearnSignature(ByVal normalizedInput As String) As String
+
+Private Function BuildLearnSignature(ByVal normalizedInput As String) As String
     Dim words() As String, keep() As String
     Dim i As Long, n As Long, tok As String
     Dim wsL As Worksheet
-          
+
     If mLookupVocab Is Nothing Then
         Set wsL = GetLookupSheet()
         If Not wsL Is Nothing Then
@@ -1848,10 +1803,10 @@ Public Function BuildLearnSignature(ByVal normalizedInput As String) As String
             BuildLookupCache wsL
         End If
     End If
-          
+
     words = Tokenize(normalizedInput)
     If IsEmptyArray(words) Then BuildLearnSignature = "": Exit Function
-              
+
     ReDim keep(0 To UBound(words))
     n = 0
     For i = LBound(words) To UBound(words)
@@ -1861,12 +1816,12 @@ Public Function BuildLearnSignature(ByVal normalizedInput As String) As String
         If IsDescriptorToken(tok) Then GoTo NextTok
         ' If Not IsAllAlphaNum(tok) Then GoTo NextTok ' Relaxed to allow hyphenated tags
         If IsTagLike(tok) Then GoTo NextTok
-        
+
         ' Allow token if it is in vocab OR if it is numeric (to distinguish Pump 1 from Pump 2)
         If Not IsAllowedLearnToken(tok) Then
             If Not IsNumeric(tok) Then GoTo NextTok
         End If
-                  
+
         keep(n) = tok
         n = n + 1
 NextTok:
@@ -1876,7 +1831,7 @@ NextTok:
     Call QuickSortStringsAsc(keep, 0, UBound(keep))
     BuildLearnSignature = Join(keep, "|")
 End Function
-          
+
 Private Sub EnsureDictionaries()
     Set mAliasDict = CreateObject("Scripting.Dictionary")
     Set mStopWords = CreateObject("Scripting.Dictionary")
@@ -1888,7 +1843,7 @@ Private Sub EnsureDictionaries()
     Set mProtectSet = CreateObject("Scripting.Dictionary")
     Set mAliasPrefix = CreateObject("Scripting.Dictionary")
     Set mAliasSuffix = CreateObject("Scripting.Dictionary")
-          
+
     ' Default Stop Words
     mStopWords("a") = True
     mStopWords("an") = True
@@ -1913,7 +1868,7 @@ Private Sub EnsureDictionaries()
     mStopWords("that") = True
     mStopWords("it") = True
     mStopWords("or") = True
-             
+
     ' Default Synonyms
     ' mAliasDict("water") = "hydronic"
     mAliasDict("hp") = "horsepower"
@@ -1922,7 +1877,7 @@ Private Sub EnsureDictionaries()
     mAliasDict("v") = "volts"
     mAliasDict("a") = "amps"
     mAliasDict("gpm") = "gallons per minute"
-    
+
     mAliasDict("h2o") = "hydronic"
     mAliasDict("restroom") = "lavatories"
     mAliasDict("restrooms") = "lavatories"
@@ -1945,89 +1900,89 @@ Private Sub EnsureDictionaries()
     mAliasDict("vav") = "variable air volume"
     mAliasDict("dwh") = "domestic water heater"
     mAliasDict.Add "humidifier", "humidification"
-          
+
     mStripNumeric = False: mStripHash = False: mStripAlphaNum = False
-          
+
     ' Load rules from external sheet
-    SyncRulesWithExternal ThisWorkbook, "Rules Sheet"
-    LoadRulesFromSheet ThisWorkbook, "Rules Sheet", _
+    SyncRulesWithExternal ThisWorkbook, SHEET_RULES
+    LoadRulesFromSheet ThisWorkbook, SHEET_RULES, _
         mAliasDict, mPhraseMap, mStopWords, mBoostDict, mCoreSet, mQualSet, mForcedOutputDict, _
         mProtectSet, mAliasPrefix, mAliasSuffix, _
         mStripNumeric, mStripHash, mStripAlphaNum
-           
+
 ' Populate mCoreSet with defaults if empty
          If mCoreSet.count = 0 Then
              Dim defaults As Variant
              Dim def As Variant
              ' OLD LINE:
              ' defaults = Array("pump", "fan", "boiler", "furnace", "transformer", "compressor", "chiller", "motor", "sump", "sprinkler", "valve")
-               
+
              ' NEW LINE (Added "hydrant"):
              defaults = Array("pump", "fan", "boiler", "furnace", "transformer", _
                               "compressor", "chiller", "motor", "sump", "sprinkler", _
                               "valve", "hydrant", "tower", "exchanger", "tank")
-               
+
              For Each def In defaults
                  mCoreSet(def) = True
              Next def
         End If
 End Sub
-          
+
 Private Sub BuildLookupCache(ByVal wsLookup As Worksheet)
     Dim lastLookupRow As Long
     lastLookupRow = wsLookup.Cells(wsLookup.Rows.count, "A").End(xlUp).Row
     If lastLookupRow < 2 Then mLookupCount = 0: Exit Sub
-        
+
     ' 1. LOAD THE MAIN LOOKUP DATA
     Dim lookupArr As Variant
     lookupArr = wsLookup.Range("A2:C" & lastLookupRow).Value
-        
+
     Dim j As Long, k As Long
     mLookupCount = UBound(lookupArr, 1)
-            
+
     ReDim mLookupPhrases(1 To mLookupCount)
     ReDim mLookupWords(1 To mLookupCount)
     ReDim mLookupDicts(1 To mLookupCount)
     ReDim mRowCategory(1 To mLookupCount)
     ReDim mLookupWordCounts(1 To mLookupCount)
     ReDim mLookupSubjects(1 To mLookupCount)
-        
+
     Set mTokenIndex = CreateObject("Scripting.Dictionary")
     Set mLookupPhraseSet = CreateObject("Scripting.Dictionary")
     Set mSignatureDict = CreateObject("Scripting.Dictionary")
     mLookupPhraseSet.CompareMode = vbTextCompare
     mSignatureDict.CompareMode = vbTextCompare
-            
+
     Dim raw As String, normalized As String, tokens() As String, d As Object, tok As String
     Dim scrubbedRaw As String, sig As String
     Dim filteredToks() As String
     Dim ftCount As Long
-        
+
     For j = 1 To mLookupCount
         If Not IsError(lookupArr(j, 3)) Then mRowCategory(j) = LCase$(Trim$(CStr(lookupArr(j, 3))))
         If Not IsError(lookupArr(j, 1)) Then
             raw = CStr(lookupArr(j, 1))
             mLookupPhrases(j) = raw
-                  
+
             scrubbedRaw = GetStandardKey(raw)
             If Len(scrubbedRaw) > 0 Then mLookupPhraseSet(scrubbedRaw) = True
-                  
+
             ' Normalize the Name
             normalized = NormalizeAndAlias(raw, mAliasDict)
-                  
+
             ' Tokenize directly without Data Enrichment bloat
             tokens = Tokenize(normalized)
-                  
+
             ' Create Canonical Signature
             sig = GetCanonicalSignature(raw)
             If Len(sig) > 0 Then
                 If Not mSignatureDict.Exists(sig) Then mSignatureDict(sig) = raw
             End If
-                   
+
             Set d = CreateObject("Scripting.Dictionary")
             ReDim filteredToks(0 To UBound(tokens))
             ftCount = 0
-                    
+
             If Not IsEmptyArray(tokens) Then
                 For k = LBound(tokens) To UBound(tokens)
                     tok = tokens(k)
@@ -2035,7 +1990,7 @@ Private Sub BuildLookupCache(ByVal wsLookup As Worksheet)
                         d(tok) = True
                         filteredToks(ftCount) = tok
                         ftCount = ftCount + 1
-                                
+
                         Dim coll As Collection
                         If mTokenIndex.Exists(tok) Then
                             Set coll = mTokenIndex(tok)
@@ -2048,7 +2003,7 @@ Private Sub BuildLookupCache(ByVal wsLookup As Worksheet)
                 Next k
             End If
             Set mLookupDicts(j) = d
-                    
+
             If ftCount > 0 Then
                 ReDim Preserve filteredToks(0 To ftCount - 1)
                 mLookupWords(j) = filteredToks
@@ -2067,33 +2022,33 @@ Private Sub BuildLookupCache(ByVal wsLookup As Worksheet)
             mLookupWordCounts(j) = 0
         End If
     Next j
-        
+
     BuildCategoryDictionaryFromLookup wsLookup
     BuildTokenWeights
     BuildLookupVocabulary
 End Sub
-      
-          
+
+
 Private Sub BuildTokenWeights()
     Dim k As Variant, count As Long
     Dim w As Double
     Set mTokenWeights = CreateObject("Scripting.Dictionary")
-              
+
     If mTokenIndex Is Nothing Then Exit Sub
     If mLookupCount = 0 Then Exit Sub
-              
+
     For Each k In mTokenIndex.keys
         count = mTokenIndex(k).count
         w = 1 + Log(mLookupCount / (count + 1))
-           
+
         ' Manual Boost for Core Tokens (prevents Rare Word Dominance)
         If mCoreSet.Exists(k) Then w = w * 2.5
-           
+
         If w < 0.1 Then w = 0.1
         mTokenWeights(CStr(k)) = w
     Next k
 End Sub
-          
+
 Private Sub BuildLookupVocabulary()
     Dim k As Variant
     Set mLookupVocab = CreateObject("Scripting.Dictionary")
@@ -2102,59 +2057,13 @@ Private Sub BuildLookupVocabulary()
         mLookupVocab(CStr(k)) = True
     Next k
 End Sub
-          
-' ==========================================================
-' UPDATED: CreateSelectionListForSingleRow (Direct Comma-Separated List)
-' ==========================================================
+
 Private Sub CreateSelectionListForSingleRow(ByVal wsInput As Worksheet, ByVal rowNum As Long)
-    Dim cell As Range
-    Dim parts() As String, raw As String
-    Dim itemCount As Long
-    Dim listString As String
-           
-    Set cell = wsInput.Cells(rowNum, "B")
-    raw = CStr(cell.Value2)
-    If Len(raw) = 0 Then
-        On Error Resume Next: cell.Validation.Delete: On Error GoTo 0
-        Exit Sub
-    End If
-               
-    raw = Replace(raw, vbCrLf, vbLf)
-    raw = Replace(raw, vbCr, vbLf)
-    parts = Split(raw, vbLf)
-    itemCount = UBound(parts) - LBound(parts) + 1
-           
-    If itemCount >= 2 Then
-        listString = Join(parts, ",")
-        
-        On Error Resume Next
-        cell.Validation.Delete
-        On Error GoTo 0
-        
-        ' FIX: If the original items contain commas, Excel will improperly split them.
-        ' We must route them to the safe Fallback method.
-        If Len(listString) < 255 And InStr(raw, ",") = 0 Then
-            With cell.Validation
-                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=listString
-                .IgnoreBlank = True
-                .InCellDropdown = True
-                .ShowError = False
-            End With
-        Else
-            CreateSelectionListForSingleRow_Fallback wsInput, rowNum, parts
-        End If
-    Else
-        On Error Resume Next: cell.Validation.Delete: On Error GoTo 0
-    End If
-End Sub
-' ==========================================================
-' NEW FALLBACK: Called automatically if the list is > 255 chars
-' ==========================================================
-Private Sub CreateSelectionListForSingleRow_Fallback(ByVal wsInput As Worksheet, ByVal rowNum As Long, parts() As String)
     Dim wsList As Worksheet, cell As Range
+    Dim parts() As String, raw As String
     Dim listName As String, itemCount As Long
     Dim rngList As Range
-           
+
     On Error Resume Next
     Set wsList = ThisWorkbook.Worksheets(PICK_SHEET_NAME)
     On Error GoTo 0
@@ -2163,36 +2072,47 @@ Private Sub CreateSelectionListForSingleRow_Fallback(ByVal wsInput As Worksheet,
         wsList.Name = PICK_SHEET_NAME
     End If
     wsList.Visible = xlSheetHidden
-           
+
     Set cell = wsInput.Cells(rowNum, "B")
+    raw = CStr(cell.Value2)
+    If Len(raw) = 0 Then
+        On Error Resume Next: cell.Validation.Delete: On Error GoTo 0
+        Exit Sub
+    End If
+
+    raw = Replace(raw, vbCrLf, vbLf)
+    raw = Replace(raw, vbCr, vbLf)
+    parts = Split(raw, vbLf)
     itemCount = UBound(parts) - LBound(parts) + 1
+
     listName = "PickRow_" & rowNum
-    
-    Set rngList = GetOrCreateListRange(wsList, listName, itemCount)
-    Dim i As Long, p As Long: p = LBound(parts)
-    For i = 1 To itemCount
-        rngList.Cells(i, 1).Value = Trim$(parts(p))
-        p = p + 1
-    Next i
-               
-    On Error Resume Next: cell.Validation.Delete: On Error GoTo 0
-    
-    With cell.Validation
-        ' Crucial fix: Added the single quotes around the sheet name!
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="='" & wsList.Name & "'!" & rngList.Address
-        .IgnoreBlank = True
-        .InCellDropdown = True
-        .ShowError = False
-    End With
+    If itemCount >= 2 Then
+        Set rngList = GetOrCreateListRange(wsList, listName, itemCount)
+        Dim i As Long, p As Long: p = LBound(parts)
+        For i = 1 To itemCount
+            rngList.Cells(i, 1).Value = Trim$(parts(p))
+            p = p + 1
+        Next i
+
+        With cell.Validation
+            .Delete
+            .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="=" & listName
+            .IgnoreBlank = True
+            .InCellDropdown = True
+            .ShowError = True
+        End With
+    Else
+        On Error Resume Next: cell.Validation.Delete: On Error GoTo 0
+        On Error Resume Next: ThisWorkbook.names(listName).Delete: On Error GoTo 0
+    End If
 End Sub
 
-          
 Private Function GetOrCreateListRange(ByVal wsList As Worksheet, ByVal listName As String, ByVal itemCount As Long) As Range
     Dim nm As Name, rng As Range
     On Error Resume Next
     Set nm = ThisWorkbook.names(listName)
     On Error GoTo 0
-              
+
     If Not nm Is Nothing Then
         On Error Resume Next: Set rng = nm.RefersToRange: On Error GoTo 0
         If Not rng Is Nothing Then
@@ -2202,28 +2122,38 @@ Private Function GetOrCreateListRange(ByVal wsList As Worksheet, ByVal listName 
              End If
         End If
     End If
-          
+
     Dim startRow As Long, endRow As Long
     startRow = wsList.Cells(wsList.Rows.count, "A").End(xlUp).Row
     If startRow < 1 Then startRow = 1
     If Len(wsList.Cells(startRow, "A").Value) > 0 Then startRow = startRow + 1
     endRow = startRow + itemCount - 1
-          
+
     Set rng = wsList.Range(wsList.Cells(startRow, "A"), wsList.Cells(endRow, "A"))
-              
+
     On Error Resume Next: ThisWorkbook.names(listName).Delete: On Error GoTo 0
     ThisWorkbook.names.Add Name:=listName, RefersTo:=rng
     Set GetOrCreateListRange = rng
 End Function
-          
-' ==========================================================
-' UPDATED: CreateSelectionListsForColumnB (Direct Comma-Separated List)
-' ==========================================================
+
 Private Sub CreateSelectionListsForColumnB(ByVal wsInput As Worksheet, ByVal n As Long)
+    Dim wsList As Worksheet
     Dim i As Long, cell As Range, parts() As String
+    Dim listStartRow As Long, listEndRow As Long
+    Dim rngList As Range, listName As String
     Dim raw As String
-    Dim listString As String
-           
+
+    On Error Resume Next
+    Set wsList = ThisWorkbook.Worksheets(PICK_SHEET_NAME)
+    On Error GoTo 0
+    If wsList Is Nothing Then
+        Set wsList = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.count))
+        wsList.Name = PICK_SHEET_NAME
+    End If
+    wsList.Visible = xlSheetHidden
+    wsList.Cells.Clear
+
+    listStartRow = 1
     For i = 2 To (n + 1)
         Set cell = wsInput.Cells(i, "B")
         raw = CStr(cell.Value2)
@@ -2232,21 +2162,27 @@ Private Sub CreateSelectionListsForColumnB(ByVal wsInput As Worksheet, ByVal n A
             raw = Replace(raw, vbCr, vbLf)
             parts = Split(raw, vbLf)
             If (UBound(parts) - LBound(parts) + 1) >= 2 Then
-                listString = Join(parts, ",")
-                
-                On Error Resume Next: cell.Validation.Delete: On Error GoTo 0
-                
-                ' FIX: Protect against comma-splitting
-                If Len(listString) < 255 And InStr(raw, ",") = 0 Then
-                    With cell.Validation
-                        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=listString
-                        .IgnoreBlank = True
-                        .InCellDropdown = True
-                        .ShowError = False
-                    End With
-                Else
-                    CreateSelectionListForSingleRow_Fallback wsInput, i, parts
-                End If
+                listEndRow = listStartRow + (UBound(parts) - LBound(parts))
+                Dim r As Long, p As Long
+                p = LBound(parts)
+                For r = listStartRow To listEndRow
+                    wsList.Cells(r, "A").Value = Trim$(parts(p))
+                    p = p + 1
+                Next r
+
+                listName = "PickRow_" & i
+                On Error Resume Next: ThisWorkbook.names(listName).Delete: On Error GoTo 0
+                Set rngList = wsList.Range(wsList.Cells(listStartRow, "A"), wsList.Cells(listEndRow, "A"))
+                ThisWorkbook.names.Add Name:=listName, RefersTo:=rngList
+
+                With cell.Validation
+                    .Delete
+                    .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="=" & listName
+                    .IgnoreBlank = True
+                    .InCellDropdown = True
+                    .ShowError = True
+                End With
+                listStartRow = listEndRow + 1
             Else
                 On Error Resume Next: cell.Validation.Delete: On Error GoTo 0
             End If
@@ -2255,59 +2191,58 @@ Private Sub CreateSelectionListsForColumnB(ByVal wsInput As Worksheet, ByVal n A
         End If
     Next i
 End Sub
-          
+
 Private Sub LoadLearnedOverrides()
     Dim ws As Worksheet, lastRow As Long, arr As Variant
     Dim i As Long, normIn As String, outP As String, sig As String
     Dim times As Long
     Dim vSig As String
-      
+
     If mLearnedLoaded Then Exit Sub
     EnsureLearnedSheet
     Set ws = ThisWorkbook.Worksheets(LEARNED_SHEET)
-          
+
     Set mLearnedExact = CreateObject("Scripting.Dictionary")
     Set mLearnedSigBest = CreateObject("Scripting.Dictionary")
     Set mLearnedSigCount = CreateObject("Scripting.Dictionary")
     Set mLearnedVocabSigBest = CreateObject("Scripting.Dictionary")
-          
+
     lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
-    
-    ' 1. Load from the local sheet ONLY if there is data
-    If lastRow >= 2 Then
-        arr = ws.Range("A2:E" & lastRow).Value2
-        For i = 1 To UBound(arr, 1)
-            normIn = CStr(arr(i, 1))
-            outP = CStr(arr(i, 2))
-            sig = CStr(arr(i, 3))
-            times = CLng(val(arr(i, 4)))
-              
-            If Len(normIn) > 0 And Len(outP) > 0 Then
-                mLearnedExact(normIn) = outP
-                         
-                vSig = GetVocabSignature(normIn)
-                If Len(vSig) > 0 Then
-                    mLearnedVocabSigBest(vSig) = outP
-                End If
+    If lastRow < 2 Then
+        mLearnedLoaded = True
+        Exit Sub
+    End If
+
+    arr = ws.Range("A2:E" & lastRow).Value2
+    For i = 1 To UBound(arr, 1)
+        normIn = CStr(arr(i, 1))
+        outP = CStr(arr(i, 2))
+        sig = CStr(arr(i, 3))
+        times = CLng(val(arr(i, 4)))
+
+        If Len(normIn) > 0 And Len(outP) > 0 Then
+            mLearnedExact(normIn) = outP
+
+            vSig = GetVocabSignature(normIn)
+            If Len(vSig) > 0 Then
+                mLearnedVocabSigBest(vSig) = outP
             End If
-            If Len(sig) > 0 And Len(outP) > 0 Then
-                If Not mLearnedSigBest.Exists(sig) Then
+        End If
+        If Len(sig) > 0 And Len(outP) > 0 Then
+            If Not mLearnedSigBest.Exists(sig) Then
+                mLearnedSigBest(sig) = outP
+                mLearnedSigCount(sig) = times
+            Else
+                 If times > CLng(mLearnedSigCount(sig)) Then
                     mLearnedSigBest(sig) = outP
                     mLearnedSigCount(sig) = times
-                Else
-                     If times > CLng(mLearnedSigCount(sig)) Then
-                        mLearnedSigBest(sig) = outP
-                        mLearnedSigCount(sig) = times
-                    End If
                 End If
             End If
-        Next i
-    End If
-    
-    ' 2. ALWAYS sync and load from the permanent text file, even if local sheet is empty!
+        End If
+    Next i
     MigrateLocalLearningsToExternal
     ImportExternalData
-        
+
     If mLearnedExact.count > 0 Then
         Dim k As Long, key As Variant
         ReDim mLearnedSubstKeys(0 To mLearnedExact.count - 1)
@@ -2320,10 +2255,10 @@ Private Sub LoadLearnedOverrides()
     Else
         Erase mLearnedSubstKeys
     End If
-        
+
     mLearnedLoaded = True
 End Sub
-          
+
 Private Sub EnsureLearnedSheet()
     Dim ws As Worksheet
     On Error Resume Next
@@ -2337,51 +2272,51 @@ Private Sub EnsureLearnedSheet()
     End If
     ws.Visible = xlSheetHidden
 End Sub
-          
+
 Private Function GetExternalFilePath() As String
     GetExternalFilePath = Environ("APPDATA") & "\Uniformat_Learned.txt"
 End Function
-          
+
 Private Sub AppendToExternalFile(ByVal normIn As String, ByVal outP As String, ByVal sig As String)
     ' We no longer append. We redirect all save requests to the clean sync method.
     MigrateLocalLearningsToExternal
 End Sub
-          
+
 Private Sub MigrateLocalLearningsToExternal()
     Dim ws As Worksheet, lastRow As Long, arr As Variant
     Dim i As Long, normIn As String, outP As String, sig As String
     Dim p As String, fNum As Integer
     Dim lineStr As String, parts() As String
     Dim diskMap As Object, key As String
-    
+
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(LEARNED_SHEET)
     On Error GoTo 0
     If ws Is Nothing Then Exit Sub
-    
+
     p = GetExternalFilePath()
     Set diskMap = CreateObject("Scripting.Dictionary")
-    
+
+    ' 1. Read existing external file into memory (if exists)
     If Dir(p) <> "" Then
-        On Error Resume Next
         fNum = FreeFile
         Open p For Input As #fNum
-        If Err.Number = 0 Then
-            Do While Not EOF(fNum)
-                Line Input #fNum, lineStr
-                If Len(lineStr) > 0 Then
-                    parts = Split(lineStr, "|")
-                    If UBound(parts) >= 1 Then
-                        key = parts(0)
-                        diskMap(key) = lineStr
-                    End If
+        Do While Not EOF(fNum)
+            Line Input #fNum, lineStr
+            If Len(lineStr) > 0 Then
+                parts = Split(lineStr, "|")
+                If UBound(parts) >= 1 Then
+                    ' Key = NormalizedInput
+                    key = parts(0)
+                    diskMap(key) = lineStr
                 End If
-            Loop
-            Close #fNum
-        End If
-        On Error GoTo 0
+            End If
+        Loop
+        Close #fNum
     End If
-    
+
+    ' 2. Merge local data (overwrites external if collision, or we could check timestamps)
+    ' Current logic: Local wins (since user just made a choice)
     lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
     If lastRow >= 2 Then
         arr = ws.Range("A2:C" & lastRow).Value2
@@ -2395,21 +2330,17 @@ Private Sub MigrateLocalLearningsToExternal()
             End If
         Next i
     End If
-    
-    ' FIX: Protected file writing
-    On Error Resume Next
+
+    ' 3. Write back to external file
     fNum = FreeFile
     Open p For Output As #fNum
-    If Err.Number = 0 Then
-        Dim k As Variant
-        For Each k In diskMap.keys
-            Print #fNum, diskMap(k)
-        Next k
-        Close #fNum
-    End If
-    On Error GoTo 0
+    Dim k As Variant
+    For Each k In diskMap.keys
+        Print #fNum, diskMap(k)
+    Next k
+    Close #fNum
 End Sub
-          
+
 Private Sub ImportExternalData()
     Dim p As String, fNum As Integer
     Dim lineStr As String, parts() As String
@@ -2446,33 +2377,33 @@ Private Sub ImportExternalData()
     Close #fNum
     On Error GoTo 0
 End Sub
-          
+
 Private Function GetExternalRulesFilePath() As String
     GetExternalRulesFilePath = Environ("APPDATA") & "\Uniformat_Rules.txt"
 End Function
-          
+
 Private Sub SyncRulesWithExternal(ByVal wb As Workbook, ByVal sheetName As String)
     Dim ws As Worksheet
     Dim p As String, lineStr As String
     Dim fNum As Integer
     Dim r As Long, lastRow As Long
-     
+
     ' 1. Locate the Rules Sheet
     On Error Resume Next
     Set ws = wb.Worksheets(sheetName)
     On Error GoTo 0
     If ws Is Nothing Then Exit Sub
-     
+
     ' 2. Get the file path for the backup text file
     p = GetExternalRulesFilePath()
-     
+
     ' 3. Find the last row of data in the Excel sheet
     lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
-     
+
     ' 4. Open the text file to overwrite it entirely (Output mode clears the file)
     fNum = FreeFile
     Open p For Output As #fNum
-     
+
     ' 5. Loop through the Excel sheet and write every rule to the text file
     If lastRow >= 2 Then
         For r = 2 To lastRow
@@ -2483,11 +2414,11 @@ Private Sub SyncRulesWithExternal(ByVal wb As Workbook, ByVal sheetName As Strin
             Print #fNum, lineStr
         Next r
     End If
-     
+
     ' 6. Close and release the file
     Close #fNum
 End Sub
-          
+
 Private Sub LoadRulesFromSheet(ByVal wb As Workbook, ByVal sheetName As String, _
     ByVal aliasDict As Object, ByVal phraseMap As Object, _
     ByVal stopWords As Object, ByVal boostDict As Object, _
@@ -2527,29 +2458,29 @@ Private Sub LoadRulesFromSheet(ByVal wb As Workbook, ByVal sheetName As String, 
         End If
     Next r
 End Sub
-          
+
 Private Function NormalizeNewlines(ByVal s As String) As String
     s = Replace$(s, vbCrLf, vbLf)
     s = Replace$(s, vbCr, vbLf)
     NormalizeNewlines = s
 End Function
-          
+
 ' ==========================================================
 ' MISSING FUNCTION: TryLearnedOverride (Paste at Bottom)
 ' ==========================================================
-          
+
 Private Function SubstituteLearnedPhrases(ByVal normInput As String) As String
     Dim i As Long
     Dim key As String, outVal As String
     Dim res As String
-        
+
     res = normInput
-        
+
     If IsEmptyArray(mLearnedSubstKeys) Then
         SubstituteLearnedPhrases = res
         Exit Function
     End If
-        
+
     For i = LBound(mLearnedSubstKeys) To UBound(mLearnedSubstKeys)
         key = mLearnedSubstKeys(i)
         ' Optimization: Check if key exists before trying replace
@@ -2560,16 +2491,16 @@ Private Function SubstituteLearnedPhrases(ByVal normInput As String) As String
             res = ReplaceWordish(res, key, outVal)
         End If
     Next i
-        
+
     SubstituteLearnedPhrases = res
 End Function
-          
+
 Private Function TryLearnedOverride(ByVal normalizedInput As String, ByRef outVal As String, ByRef confVal As String) As Boolean
     Dim sig As String
-              
+
     ' Ensure data is loaded
     LoadLearnedOverrides
-          
+
     ' 1. Check Exact Match
     If Not mLearnedExact Is Nothing Then
         If mLearnedExact.Exists(normalizedInput) Then
@@ -2581,7 +2512,7 @@ Private Function TryLearnedOverride(ByVal normalizedInput As String, ByRef outVa
             End If
         End If
     End If
-          
+
     ' 2. Check Signature Match (Scrambled words)
     sig = BuildLearnSignature(normalizedInput)
     If Len(sig) > 0 Then
@@ -2596,7 +2527,7 @@ Private Function TryLearnedOverride(ByVal normalizedInput As String, ByRef outVa
             End If
         End If
     End If
-             
+
     ' 3. Check Vocab Signature Match (Learned)
     If Not mLearnedVocabSigBest Is Nothing Then
         Dim vSig As String
@@ -2612,34 +2543,34 @@ Private Function TryLearnedOverride(ByVal normalizedInput As String, ByRef outVa
             End If
         End If
     End If
-              
+
     TryLearnedOverride = False
 End Function
-       
+
 Public Sub DiagnoseMatcher()
     Dim ws As Worksheet
     Dim msg As String
-           
+
     ' 1. Set the worksheet (Verify name matches your tab exactly)
     On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets("Uniformat RS Means Lookup")
+    Set ws = ThisWorkbook.Worksheets(SHEET_LOOKUP)
     On Error GoTo 0
-           
+
     If ws Is Nothing Then
         MsgBox "CRITICAL ERROR: Sheet 'Uniformat RS Means Lookup' not found!"
         Exit Sub
     End If
-           
+
     ' 2. Initialize the Dictionary (This builds mTokenIndex)
     ' This calls the Private Sub inside this module
     Call InitializeMatcher(ws)
-           
+
     ' 3. Check if the dictionary is actually alive
     If mTokenIndex Is Nothing Then
         MsgBox "CRITICAL ERROR: mTokenIndex failed to initialize."
         Exit Sub
     End If
-           
+
     ' 4. Test specific words to see if the Matcher knows them
     msg = "Dictionary Status:" & vbCrLf
     msg = msg & "Total Words Known: " & mTokenIndex.count & vbCrLf
@@ -2649,36 +2580,36 @@ Public Sub DiagnoseMatcher()
     msg = msg & "Knows 'water'? " & mTokenIndex.Exists("water") & vbCrLf
     msg = msg & "Knows 'barrie'? " & mTokenIndex.Exists("barrie") & vbCrLf
     msg = msg & "Knows 'dom'? " & mTokenIndex.Exists("dom") & " (If False, aliases needed)"
-           
+
     MsgBox msg
 End Sub
-   
-  
+
+
 ' ==========================================================
 ' MISSING FUNCTION: FindClosestVocabMatch (Added)
 ' ==========================================================
-  
+
 Private Function FindClosestVocabMatch(ByVal token As String) As String
     ' Returns the closest match from mLookupVocab if it meets a similarity threshold
     ' This is a "Typo Watchdog" helper
-      
+
     If mLookupVocab Is Nothing Then Exit Function
     If mLookupVocab.Exists(token) Then
         FindClosestVocabMatch = token
         Exit Function
     End If
-      
+
     ' Optimization: Don't scan if token is too short
     If Len(token) < 3 Then Exit Function
-      
+
     Dim bestMatch As String
     Dim bestScore As Double
     Dim key As Variant
     Dim score As Double
     Dim sKey As String
-      
+
     bestScore = 0#
-      
+
     For Each key In mLookupVocab.keys
         sKey = CStr(key)
         ' Optimization: Only check words of similar length (+/- 2 chars)
@@ -2691,17 +2622,17 @@ Private Function FindClosestVocabMatch(ByVal token As String) As String
             End If
         End If
     Next key
-      
+
     ' Threshold for correction: Must be a very strong match (e.g. > 0.8) to risk auto-correction
     If bestScore >= 0.8 Then
         FindClosestVocabMatch = bestMatch
     End If
 End Function
-  
-  
+
+
 ' NEW HELPER FUNCTIONS
 ' ==========================================================
-   
+
 ' Improved Subject Detection (Looks for last CORE Token)
 Private Function GetInputSubject(ByVal tokens As Variant) As String
     If IsEmptyArray(tokens) Then Exit Function
@@ -2709,7 +2640,7 @@ Private Function GetInputSubject(ByVal tokens As Variant) As String
         GetInputSubject = tokens(UBound(tokens))
         Exit Function
     End If
-       
+
     Dim i As Long
     ' Scan backwards
     For i = UBound(tokens) To LBound(tokens) Step -1
@@ -2719,18 +2650,18 @@ Private Function GetInputSubject(ByVal tokens As Variant) As String
             Exit Function
         End If
     Next i
-       
+
     ' Fallback to last word if no core token found
     GetInputSubject = tokens(UBound(tokens))
 End Function
-   
+
 ' Bi-gram Similarity
 Private Function GetBigramSimilarity(ByVal inputToks As Variant, ByVal targetToks As Variant) As Double
     If UBound(inputToks) < 1 Or UBound(targetToks) < 1 Then Exit Function
-       
+
     Dim inputGrams As Object: Set inputGrams = CreateObject("Scripting.Dictionary")
     Dim targetGrams As Object: Set targetGrams = CreateObject("Scripting.Dictionary")
-       
+
     Dim i As Long, s As String
     For i = LBound(inputToks) To UBound(inputToks) - 1
         s = inputToks(i) & "|" & inputToks(i + 1)
@@ -2740,57 +2671,56 @@ Private Function GetBigramSimilarity(ByVal inputToks As Variant, ByVal targetTok
         s = targetToks(i) & "|" & targetToks(i + 1)
         targetGrams(s) = True
     Next i
-       
+
     Dim matchCount As Long: matchCount = 0
     Dim k As Variant
     For Each k In inputGrams.keys
         If targetGrams.Exists(k) Then matchCount = matchCount + 1
     Next k
-       
+
     If matchCount = 0 Then Exit Function
-       
+
     ' Dice Coefficient for Bigrams
     Dim totalGrams As Long
     totalGrams = inputGrams.count + targetGrams.count
-       
+
     If totalGrams > 0 Then
         GetBigramSimilarity = (2 * matchCount) / totalGrams
     End If
 End Function
-
 Public Sub PropagateLearnedChoice(ByVal ws As Worksheet, ByVal sourceRow As Long, ByVal targetSig As String, ByVal targetNorm As String, ByVal chosenOut As String)
     Dim lastRow As Long, r As Long
     Dim raw As String, norm As String, rowSig As String
-    
+
     ' NEW: Variables to remember the current system state
     Dim prevEvents As Boolean
     Dim prevScreen As Boolean
-    
+
     If Len(chosenOut) = 0 Then Exit Sub
     If Len(targetSig) = 0 And Len(targetNorm) = 0 Then Exit Sub
-     
+
     lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
     If lastRow < 2 Then Exit Sub
-     
+
     ' Capture the state BEFORE we turn it off
     prevEvents = Application.EnableEvents
     prevScreen = Application.ScreenUpdating
-     
+
     On Error GoTo SafeExit
     Application.ScreenUpdating = False
     Application.EnableEvents = False
-     
+
     For r = 2 To lastRow
         If r <> sourceRow Then
             raw = CStr(ws.Cells(r, "A").Value2)
             If Len(Trim$(raw)) > 0 Then
                 norm = NormalizeAndAlias(raw, mAliasDict)
                 rowSig = BuildLearnSignature(norm)
-                 
+
                 If (Len(targetSig) > 0 And rowSig = targetSig) Or (norm = targetNorm) Then
                     ws.Cells(r, "B").Value2 = chosenOut
                     ws.Cells(r, "C").Value2 = "Auto-Propagated"
-                     
+
                     On Error Resume Next
                     ws.Cells(r, "B").Validation.Delete
                     On Error GoTo 0
@@ -2798,13 +2728,16 @@ Public Sub PropagateLearnedChoice(ByVal ws As Worksheet, ByVal sourceRow As Long
             End If
         End If
     Next r
-     
+
 SafeExit:
     ' Restore the state to exactly what it was before this function ran
     Application.ScreenUpdating = prevScreen
     Application.EnableEvents = prevEvents
-    
-    If Err.Number <> 0 Then MsgBox "Error propagating choice: " & Err.Description
+
+    If Err.Number <> 0 Then
+        MsgBox "Error propagating choice: " & Err.Description
+        Err.Clear
+    End If
 End Sub
 
 ' ==========================================================
@@ -2824,7 +2757,7 @@ Private Function EscapeJSON(ByVal txt As String) As String
     safeTxt = Replace(safeTxt, vbTab, "\t")
     safeTxt = Replace(safeTxt, Chr(8), "\b")  ' Backspace
     safeTxt = Replace(safeTxt, Chr(12), "\f") ' Form feed
-    
+
     EscapeJSON = safeTxt
 End Function
 
@@ -2833,84 +2766,83 @@ End Function
 ' ==========================================================
 Public Sub RunAISniper(ws As Worksheet, rowNum As Long, inputPhrase As String)
     Dim aiCleanedPhrase As String
-     
+
     If mAliasDict Is Nothing Then EnsureDictionaries
-     
+
     ' Send raw text straight to Python's Shredder!
     aiCleanedPhrase = inputPhrase
-     
+
     ' THE SHIELD: Turn off Excel's ears
     Application.EnableEvents = False
-     
+
     Dim http As Object
+    On Error Resume Next
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
-    Dim url As String: url = "http://127.0.0.1:5000/batch_lookup"
-     
+    If http Is Nothing Then
+        Set http = CreateObject("MSXML2.XMLHTTP")
+    End If
+    On Error GoTo 0
+
+    Dim url As String: url = AI_SERVER_URL & "/batch_lookup"
+
     ' Use the new robust EscapeJSON helper
     Dim safeText As String
     safeText = EscapeJSON(aiCleanedPhrase)
-     
+
     ' Package it safely
     Dim jsonPayload As String
     jsonPayload = "{""items"": [{""row"": " & rowNum & ", ""phrase"": """ & safeText & """}]}"
-     
+
     On Error GoTo ApiError
-    
+
     ' Set reasonable timeouts: Resolve (5s), Connect (5s), Send (5s), Receive (15s)
+    On Error Resume Next
     http.setTimeouts 5000, 5000, 5000, 15000
-    
+    On Error GoTo ApiError
+
     http.Open "POST", url, False
     http.setRequestHeader "Content-Type", "application/json"
     http.send jsonPayload
-     
+
     ' Unpack Python's answer
     Dim responseText As String
     responseText = http.responseText
-     
+
     ' Extract the Match and the Confidence Reason
     Dim matchStr As String, confStr As String
     Dim matchStart As Long, matchEnd As Long
     Dim confStart As Long, confEnd As Long
-     
+
     matchStart = InStr(responseText, """match"":""") + 9
     If matchStart > 9 Then
         matchEnd = InStr(matchStart, responseText, """")
         matchStr = Mid(responseText, matchStart, matchEnd - matchStart)
     End If
-     
+
     confStart = InStr(responseText, """id"":""") + 6
     If confStart > 6 Then
         confEnd = InStr(confStart, responseText, """")
         confStr = Mid(responseText, confStart, confEnd - confStart)
     End If
- 
+
 ' DECISION ENGINE
     If matchStr <> "" And matchStr <> "UNKNOWN" And matchStr <> "No good match" Then
-        
+
         ' --- NEW: CREATE A YES/NO DROPDOWN FOR AI GUESSES ---
         If confStr = "AI_HYBRID_MATCH" Then
             ' Put the warning symbol in Column C so you know to look at it
             ws.Cells(rowNum, "C").Value = ChrW(9888) & " Review AI Guess"
             ' Give them a temporary blank placeholder so they MUST choose
             ws.Cells(rowNum, "B").Value = "Click to Review Guess..."
-            
+
             ' Draw the dropdown
-            On Error Resume Next
-            ws.Cells(rowNum, "B").Validation.Delete
-            On Error GoTo 0
-            
-            With ws.Cells(rowNum, "B").Validation
-                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=matchStr & ",Reject AI Guess"
-                .IgnoreBlank = True
-                .InCellDropdown = True
-                .ShowError = False
-            End With
+            ApplyDropdownToCell ws.Cells(rowNum, "B"), matchStr & ",Reject AI Guess"
         Else
             ws.Cells(rowNum, "B").Value = matchStr
             ws.Cells(rowNum, "C").Value = confStr
             ' Only permanently learn it if it was highly confident
             Call RecordLearnedOverride(rowNum)
-            
+
             On Error Resume Next
             ws.Cells(rowNum, "B").Validation.Delete
             On Error GoTo 0
@@ -2918,12 +2850,14 @@ Public Sub RunAISniper(ws As Worksheet, rowNum As Long, inputPhrase As String)
     Else
         ws.Cells(rowNum, "C").Value = "AI Failed to Resolve"
     End If
+    Set http = Nothing
     Application.EnableEvents = True
     Exit Sub
- 
+
 ApiError:
     ws.Cells(rowNum, "C").Value = "AI Offline or Error (" & Err.Description & ")"
     Application.EnableEvents = True
+    Set http = Nothing
 End Sub
 
 ' ==========================================================
@@ -2939,60 +2873,68 @@ Public Sub RunAIBulkCleanup()
     Dim httpRequest As Object
     Dim responseText As String
     Dim safePhrase As String, safeOut As String, safeConf As String
-    
+
     ' Use an array to build the JSON string much faster
     Dim jsonItems() As String
-     
-    Set ws = ThisWorkbook.Worksheets("Helper Sheet")
+
+    Set ws = ThisWorkbook.Worksheets(SHEET_HELPER)
     lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
-     
+
     Application.ScreenUpdating = False
     Application.EnableEvents = False
-     
+
     For currentStart = 2 To lastRow Step chunkSize
         currentEnd = currentStart + chunkSize - 1
         If currentEnd > lastRow Then currentEnd = lastRow
-         
+
         targetCount = 0
         ' Size the array to the maximum possible items in this chunk
         ReDim jsonItems(1 To chunkSize)
-         
+
         ' STEP 1: PREPARE DATA
         For i = currentStart To currentEnd
             inputPhrase = CStr(ws.Cells(i, "A").Value2)
             outVal = CStr(ws.Cells(i, "B").Value2)
             confVal = LCase(Trim(CStr(ws.Cells(i, "C").Value2)))
-             
+
             If Len(Trim(inputPhrase)) > 0 Then
                 targetCount = targetCount + 1
-                 
+
                 ' Clean and escape safely using the helper
                 safePhrase = EscapeJSON(inputPhrase)
                 safeOut = EscapeJSON(outVal)
                 safeConf = EscapeJSON(confVal)
-                 
+
                 ' Add to our array
                 jsonItems(targetCount) = "{""row"": " & i & ", ""phrase"": """ & safePhrase & """, ""current_match"": """ & safeOut & """, ""current_id"": """ & safeConf & """}"
             End If
         Next i
-        
+
         ' STEP 2: SEND THE PAYLOAD
         If targetCount > 0 Then
             ' Trim array to actual count and join
             ReDim Preserve jsonItems(1 To targetCount)
             jsonBody = "{""items"": [" & Join(jsonItems, ",") & "]}"
-            
+
             Application.ScreenUpdating = True
             Application.StatusBar = "?? AI Supreme Court: Judging Rows " & currentStart & " to " & currentEnd & "..."
             DoEvents
             Application.ScreenUpdating = False
-             
+
+            On Error Resume Next
             Set httpRequest = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+            If httpRequest Is Nothing Then
+                Set httpRequest = CreateObject("MSXML2.XMLHTTP")
+            End If
+            On Error GoTo 0
+
             ' Reduced Timeouts: 5s resolve, 5s connect, 10s send, 30s receive
+            On Error Resume Next
             httpRequest.setTimeouts 5000, 5000, 10000, 30000
-            httpRequest.Open "POST", "http://127.0.0.1:5000/batch_lookup", False
+            On Error GoTo 0
+            httpRequest.Open "POST", AI_SERVER_URL & "/batch_lookup", False
             httpRequest.setRequestHeader "Content-Type", "application/json"
-             
+
             On Error Resume Next
             httpRequest.send jsonBody
             If Err.Number <> 0 Then
@@ -3000,88 +2942,82 @@ Public Sub RunAIBulkCleanup()
                 GoTo Cleanup
             End If
             On Error GoTo 0
-             
+
             responseText = httpRequest.responseText
-             
+
  ' STEP 3: APPLY PYTHON'S RULING
             Dim rawObjects() As String, itemStr As String, tempArr() As String
             Dim rRow As Long, rMatch As String, rId As String, b As Long
-             
+
             rawObjects = Split(responseText, "{")
             For b = 1 To UBound(rawObjects)
                 itemStr = rawObjects(b)
                 If InStr(itemStr, """row"":") > 0 And InStr(itemStr, """match"":") > 0 Then
                     rRow = val(Split(itemStr, """row"":")(1))
-                     
+
                     tempArr = Split(itemStr, """match"":""")
                     If UBound(tempArr) > 0 Then rMatch = Split(tempArr(1), """")(0)
-                     
+
                     tempArr = Split(itemStr, """id"":""")
                     If UBound(tempArr) > 0 Then rId = Split(tempArr(1), """")(0)
-                     
+
                     If rMatch <> "UNKNOWN" And rMatch <> "" And rMatch <> "SKIP" Then
-                        
+
                         ' --- NEW: CREATE A YES/NO DROPDOWN FOR AI GUESSES ---
                         If rId = "AI_HYBRID_MATCH" Then
                             ' Put the warning symbol in Column C so you know to look at it
                             ws.Cells(rRow, "C").Value = ChrW(9888) & " Review AI Guess"
                             ' Give them a temporary blank placeholder so they MUST choose
                             ws.Cells(rRow, "B").Value = "Click to Review Guess..."
-                            
+
                             ' Draw the dropdown
-                            On Error Resume Next
-                            ws.Cells(rRow, "B").Validation.Delete
-                            On Error GoTo 0
-                            
-                            With ws.Cells(rRow, "B").Validation
-                                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=rMatch & ",Reject AI Guess"
-                                .IgnoreBlank = True
-                                .InCellDropdown = True
-                                .ShowError = False
-                            End With
+                            ApplyDropdownToCell ws.Cells(rRow, "B"), rMatch & ",Reject AI Guess"
                         Else
                             ws.Cells(rRow, "B").Value = Replace(rMatch, "\n", vbLf)
                             ws.Cells(rRow, "C").Value = rId
-                            
+
                             On Error Resume Next
                             ws.Cells(rRow, "B").Validation.Delete
                             On Error GoTo 0
                         End If
-                        
+
                     End If
                 End If
             Next b
         End If
     Next currentStart
- 
+
 Cleanup:
     Application.ScreenUpdating = True
     Application.EnableEvents = True
     Application.StatusBar = False
+    Set httpRequest = Nothing
     MsgBox "?? Supreme Court Review Complete!", vbInformation
 End Sub
+
 Public Function GetAIMatch(ByVal messyPhrase As String) As String
     Dim http As Object
     Dim url As String
     Dim jsonPayload As String
     Dim responseText As String
     Dim matchStart As Long, matchEnd As Long
-    
+
     On Error GoTo ErrorHandler
-    
-    url = "http://127.0.0.1:5000/lookup"
-    
+
+    url = AI_SERVER_URL & "/lookup"
+
     ' Escape quotes to prevent JSON errors
     messyPhrase = Replace(messyPhrase, """", "\""")
     messyPhrase = Replace(messyPhrase, "\", "\\")
-    
+
     jsonPayload = "{""phrase"": """ & messyPhrase & """}"
-    
-    Set http = CreateObject("MSXML2.XMLHTTP")
+
+    Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    http.setTimeouts 5000, 5000, 5000, 15000
     http.Open "POST", url, False
     http.setRequestHeader "Content-Type", "application/json"
     http.send jsonPayload
-    
+
     If http.Status = 200 Then
         responseText = http.responseText
         matchStart = InStr(responseText, """match"":")
@@ -3090,13 +3026,15 @@ Public Function GetAIMatch(ByVal messyPhrase As String) As String
             matchEnd = InStr(matchStart, responseText, """")
             If matchEnd > 0 Then
                 GetAIMatch = Mid(responseText, matchStart, matchEnd - matchStart)
+                Set http = Nothing
                 Exit Function
             End If
         End If
     End If
-    
+
 ErrorHandler:
     GetAIMatch = "AI Offline"
+    Set http = Nothing
 End Function
 
 ' ==========================================================
@@ -3108,43 +3046,49 @@ Public Function CleanPastedOutput(ByVal txt As String) As String
     txt = Replace(txt, vbCr, vbLf)
     txt = Replace(txt, Chr(160), " ") ' Non-breaking space
     txt = Replace(txt, Chr(9), " ")   ' Tabs
-     
+
     ' Aggressive invisible character cleaning
     txt = Replace(txt, ChrW(8203), "")
     txt = Replace(txt, ChrW(8204), "")
     txt = Replace(txt, ChrW(8205), "")
     txt = Replace(txt, ChrW(65279), "")
-     
+
     ' Strip enclosing quotes
     If Left$(txt, 1) = """" And Right$(txt, 1) = """" And Len(txt) >= 2 Then
         txt = Mid$(txt, 2, Len(txt) - 2)
     End If
-     
+
     Dim parts() As String
     Dim i As Long, j As Long
     Dim finalStr As String
-     
+
     parts = Split(txt, vbLf)
-     
+
     For i = LBound(parts) To UBound(parts)
-    
-        ' Pure VBA Clean (Remove unprintable ASCII characters 0-31)
-        For j = 0 To 31
-            If j <> 10 And j <> 13 Then parts(i) = Replace(parts(i), Chr(j), "")
-        Next j
-        
+
+                ' Pure VBA Clean (Remove unprintable ASCII characters 0-31)
+        If mRegEx Is Nothing Then
+            Set mRegEx = CreateObject("VBScript.RegExp")
+            With mRegEx
+                .Global = True
+                .IgnoreCase = True
+            End With
+        End If
+        mRegEx.Pattern = "[\x00-\x09\x0B-\x0C\x0E-\x1F]"
+        parts(i) = mRegEx.Replace(parts(i), vbNullString)
+
         ' Pure VBA Trim and Double-Space removal
         parts(i) = Trim$(parts(i))
         Do While InStr(parts(i), "  ") > 0
             parts(i) = Replace(parts(i), "  ", " ")
         Loop
-         
+
         ' Fallback quote removal per-line
         If Left$(parts(i), 1) = """" And Right$(parts(i), 1) = """" And Len(parts(i)) >= 2 Then
             parts(i) = Mid$(parts(i), 2, Len(parts(i)) - 2)
             parts(i) = Trim$(parts(i))
         End If
-         
+
         If Len(parts(i)) > 0 Then
             If Len(finalStr) = 0 Then
                 finalStr = parts(i)
@@ -3153,65 +3097,76 @@ Public Function CleanPastedOutput(ByVal txt As String) As String
             End If
         End If
     Next i
-     
+
     CleanPastedOutput = finalStr
 End Function
+
 ' ==========================================================
 ' UPDATED: Checks if a choice came from the Dropdown list
 ' ==========================================================
 Public Function IsValueFromDropdown(ws As Worksheet, rowNum As Long, chosenVal As String) As Boolean
+    ' 1. The easiest check: Did they select the rejection option?
     If LCase$(Trim$(chosenVal)) = "reject ai guess" Then
         IsValueFromDropdown = True
         Exit Function
     End If
-    
+
+    ' 2. Re-run the exact same logic that created the dropdown in the first place!
+    ' This bypasses the need to check cell.Validation, which might have been deleted.
+
     Dim raw As String
     Dim parts() As String
     Dim i As Long
     Dim cleanChosen As String
-    
+
     cleanChosen = LCase$(Trim$(chosenVal))
-    
+
+    ' Get the original Multiple Rules text that was in Column B before they clicked
+    ' Wait, if they clicked, Column B now holds their choice!
+    ' We have to re-evaluate Column A to see what the rules WOULD have been!
+
     Dim rawInput As String
     Dim outVal As String
     Dim confVal As String
-    
+
     rawInput = CStr(ws.Cells(rowNum, "A").Value2)
-    
+
     If Len(Trim$(rawInput)) = 0 Then
         IsValueFromDropdown = False
         Exit Function
     End If
-    
-    ' FIX: Ensure matcher is awake before testing!
-    If mLookupPhraseSet Is Nothing Then
-        Dim wsL As Worksheet
-        Set wsL = GetLookupSheet()
-        If Not wsL Is Nothing Then InitializeMatcher wsL
-    End If
-    
+
+    ' Re-run the matcher silently in memory for this one row
     Call GetBestMatchForInput(rawInput, outVal, confVal)
-    
+
+    ' 3. Did the matcher originally produce a Multiple Rules list?
     If InStr(1, confVal, "Multiple Rules", vbTextCompare) > 0 Then
+        ' The outVal contains the newline-separated list of choices we gave them
         raw = Replace(outVal, vbCrLf, vbLf)
         raw = Replace(raw, vbCr, vbLf)
         parts = Split(raw, vbLf)
-        
+
         For i = LBound(parts) To UBound(parts)
             If LCase$(Trim$(parts(i))) = cleanChosen Then
+                ' They selected one of the Multiple Rules options! DO NOT LEARN!
                 IsValueFromDropdown = True
                 Exit Function
             End If
         Next i
     End If
-    
+
+    ' 4. Did the matcher originally produce an AI Hybrid Guess?
     If confVal = "AI_HYBRID_MATCH" Then
+        ' The outVal contains the single AI guess
         If LCase$(Trim$(outVal)) = cleanChosen Then
+            ' They selected the AI's guess from the dropdown! DO NOT LEARN!
+            ' (Because if the AI guessed it, it already knows it, or we don't want to reinforce a 55% guess)
             IsValueFromDropdown = True
             Exit Function
         End If
     End If
 
+    ' If it wasn't in the generated list, they must have pasted it! OK TO LEARN!
     IsValueFromDropdown = False
 End Function
 
@@ -3222,58 +3177,32 @@ Private Sub TeachPythonAI(ByVal messyPhrase As String, ByVal cleanMatch As Strin
     On Error Resume Next ' Fails silently if Python isn't running
     Dim http As Object
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
-    
+    If http Is Nothing Then
+        Set http = CreateObject("MSXML2.XMLHTTP")
+    End If
+    If http Is Nothing Then Exit Sub
+
     Dim jsonPayload As String
     jsonPayload = "{""phrase"": """ & EscapeJSON(messyPhrase) & """, ""match"": """ & EscapeJSON(cleanMatch) & """}"
-    
+
     ' 1-second timeout so it NEVER slows down your pasting workflow
     http.setTimeouts 1000, 1000, 1000, 1000
-    http.Open "POST", "http://127.0.0.1:5000/learn", False
+    http.Open "POST", AI_SERVER_URL & "/learn", False
     http.setRequestHeader "Content-Type", "application/json"
     http.send jsonPayload
     On Error GoTo 0
 End Sub
 
-' ==========================================================
-' NEW: Dynamic Search Dropdown Builder (Search-on-Enter)
-' ==========================================================
-Public Function BuildSearchDropdown(wsInput As Worksheet, rowNum As Long, searchStr As String) As Boolean
-    ' Don't bother searching if the typo is too short
-    If Len(Trim$(searchStr)) < 3 Then
-        BuildSearchDropdown = False
-        Exit Function
-    End If
-    
-    ' Wake up the engine if it's sleeping
-    If mLookupCount = 0 Then
-        Dim wsL As Worksheet: Set wsL = GetLookupSheet()
-        If Not wsL Is Nothing Then InitializeMatcher wsL
-    End If
-    
-    Dim results() As String
-    Dim count As Long: count = 0
-    ReDim results(0 To 49) ' Max 50 results to keep the UI snappy
-    
-    Dim i As Long
-    Dim sClean As String: sClean = LCase$(Trim$(searchStr))
-    
-    ' Scan the lookup cache for the partial word
-    For i = 1 To mLookupCount
-        If Len(mLookupPhrases(i)) > 0 Then
-            If InStr(1, LCase$(mLookupPhrases(i)), sClean) > 0 Then
-                results(count) = mLookupPhrases(i)
-                count = count + 1
-                If count >= 50 Then Exit For ' Cap at 50 to prevent lag
-            End If
-        End If
-    Next i
-    
-    If count > 0 Then
-        ReDim Preserve results(0 To count - 1)
-        ' Route the results through your existing hidden picklist generator
-        Call CreateSelectionListForSingleRow_Fallback(wsInput, rowNum, results)
-        BuildSearchDropdown = True
-    Else
-        BuildSearchDropdown = False
-    End If
-End Function
+
+Private Sub ApplyDropdownToCell(ByVal cell As Range, ByVal listString As String)
+    On Error Resume Next
+    cell.Validation.Delete
+    On Error GoTo 0
+
+    With cell.Validation
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=listString
+        .IgnoreBlank = True
+        .InCellDropdown = True
+        .ShowError = False
+    End With
+End Sub
