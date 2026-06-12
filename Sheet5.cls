@@ -239,7 +239,7 @@ CleanExit:
     On Error Resume Next
     
     ' ?? TURNED OFF AUTO-REFRESH TO STOP SCREEN JUMPING
-    ' If Target.Cells.count < 50 Then Call PivotBuilder_Refresh
+    If Target.Cells.count < 50 Then Call PivotBuilder_Refresh
     On Error GoTo 0
     
     ' ?? REMOVE THE SHIELD
