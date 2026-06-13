@@ -48,11 +48,11 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     ' DELETION / CLEAR BOARD LOGIC
     ' ============================================================
     If Target.Cells.count > 20 And Not hitMatchA Is Nothing Then
-        
+
         ' Constrain the target to the UsedRange to prevent memory spikes
         Dim actualHitA As Range
         Set actualHitA = Intersect(hitMatchA, Me.UsedRange)
-        
+
         If actualHitA Is Nothing Then GoTo CleanExit
 
         If Application.WorksheetFunction.CountA(actualHitA) = 0 Then
@@ -60,24 +60,24 @@ Private Sub Worksheet_Change(ByVal Target As Range)
             actualHitA.offset(0, 1).ClearContents ' Column B
             actualHitA.offset(0, 2).ClearContents ' Column C
             actualHitA.offset(0, 3).ClearContents ' Column D
-            
+
             ' Clear Column W and reset its background color to #C9E7A7
             actualHitA.offset(0, 22).ClearContents
             actualHitA.offset(0, 22).Interior.Color = RGB(201, 231, 167)
-            
+
             ' Clear Column X
             actualHitA.offset(0, 23).ClearContents
-            
+
             ' Clear Columns Y through AJ (The 12-Month Schedule Block)
             actualHitA.offset(0, 24).Resize(, 12).ClearContents
-            
+
             ' Clear Column AK (NEW)
             actualHitA.offset(0, 36).ClearContents
-            
+
             On Error Resume Next
             actualHitA.offset(0, 1).Validation.Delete
             Call Matcher.CleanupOrphanedPickLists
-            
+
             ' --- SURGICAL CLEAR FOR AI STAGING ---
             Dim wsStaging As Worksheet
             Set wsStaging = ThisWorkbook.Worksheets("AI Staging")
@@ -90,14 +90,14 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                 End If
             End If
             ' ------------------------------------------
-            
+
             On Error GoTo CleanFail
         Else
             Call Matcher.MatchOnlyChangedRows(actualHitA)
         End If
         GoTo CleanExit
     End If
-    
+
     ' ============================================================
     ' INPUT LOGIC (Column A)
     ' ============================================================
@@ -107,7 +107,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
             If Len(Trim$(CStr(c.Value2))) > 0 Then
                 Dim skipAutoMatch As Boolean
                 skipAutoMatch = False
-                
+
                 ' --- CHANGE THIS LOGIC TO ALLOW OVERWRITES ON MULTI-PASTE ---
                 If Not hitMatchB Is Nothing Then
                     If Target.Columns.count > 1 Then
@@ -147,33 +147,33 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     ' LEARNING & CONFIRMATION LOGIC (Column B)
     ' ============================================================
     If Not hitMatchB Is Nothing Then
-        
+
         ' --- NEW SAFETY CATCH ---
         ' If you pasted multiple columns at once, abort the learning block entirely
         ' so it doesn't overwrite Column C with "Check DB"
         If Target.Columns.count > 1 Then GoTo SkipLearning
         ' ------------------------
-        
+
         Dim uniqueRows As Object: Set uniqueRows = CreateObject("Scripting.Dictionary")
         For Each r In hitMatchB.Cells: uniqueRows(r.Row) = True: Next r
-        
+
         Dim key As Variant
         Dim cellInput As Range, cellOutput As Range, cellConf As Range
-        
+
         For Each key In uniqueRows.keys
             Set cellInput = Me.Cells(key, "A")
             Set cellOutput = Me.Cells(key, "B")
             Set cellConf = Me.Cells(key, "C")
-            
+
             Dim valToLearn As String
             valToLearn = Matcher.CleanPastedOutput(CStr(cellOutput.Value2))
-            
+
             ' -------------------------------------------------------------------------
             ' NEW FIX: We MUST check if this came from a dropdown BEFORE we delete it!
             ' -------------------------------------------------------------------------
             Dim SkipLearningBlock As Boolean
             SkipLearningBlock = Matcher.IsValueFromDropdown(Me, CLng(key), valToLearn)
-            
+
             ' NOW we can safely delete the validation if it's a single cell change
             If Target.CountLarge = 1 And Target.Row = key Then
                 On Error Resume Next
@@ -182,36 +182,36 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                 If Not nm Is Nothing Then nm.Delete
                 On Error GoTo CleanFail
             End If
-            
+
             cellOutput.Value2 = valToLearn
-            
+
             If Len(Trim$(CStr(cellInput.Value2))) > 0 And Len(valToLearn) > 0 Then
                 If Matcher.IsValidOutputList(valToLearn) Then
-                    
+
                     ' If they picked a dropdown value, we DO NOT LEARN!
                     If SkipLearningBlock Then
                         cellConf.Value = "Multiple Rules (Resolved)"
-                        
+
                         ' --- NEW: We still need to manually trigger propagation! ---
                         Dim norm As String, sig As String
                         norm = Matcher.NormalizeAndAlias(Trim$(CStr(cellInput.Value2)), Matcher.mAliasDict)
                         sig = Matcher.BuildLearnSignature(norm)
                         Call Matcher.PropagateLearnedChoice(Me, CLng(key), sig, norm, valToLearn)
                         ' ------------------------------------------------------------
-                        
+
                     Else
                         ' 1. Train the engine in the background
                         Matcher.RecordLearnedOverride CLng(key)
                         cellConf.Value = "High"
-                        
+
                         ' 2. NEW: Auto-propagate this fix to the rest of the sheet!
                         Dim propRaw As String
                         propRaw = Me.Cells(CLng(key), 1).Value ' Get the raw phrase from Col A
-                        
+
                         Dim propR As Long
                         Dim propLast As Long
                         propLast = Me.Cells(Me.Rows.count, 1).End(xlUp).Row
-                        
+
                         Application.EnableEvents = False ' Shield up to prevent infinite loops
                         For propR = 2 To propLast
                             ' If we find the exact same raw phrase on a different row, fix it instantly
@@ -224,7 +224,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                         Next propR
                         Application.EnableEvents = True ' Shield down
                     End If
-                    
+
                 Else
                     ' =========================================================
                     ' NEW: SEARCH-ON-ENTER INTERCEPT
@@ -232,7 +232,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                     ' =========================================================
                     If Matcher.BuildSearchDropdown(Me, CLng(key), valToLearn) Then
                         cellConf.Value = "Search Results"
-                        
+
                         ' Temporarily lift the shield to write the helper text without looping
                         Application.EnableEvents = False
                         cellOutput.Value2 = "Click dropdown to view " & valToLearn & " results..."
@@ -259,18 +259,18 @@ SkipLearning:
 
 CleanExit:
     On Error Resume Next
-    
+
     ' ?? TURNED OFF AUTO-REFRESH TO STOP SCREEN JUMPING
     If Target.Cells.count < 50 Then Call PivotBuilder_Refresh
     On Error GoTo 0
-    
+
     ' ??? REMOVE THE SHIELD
     Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
     Application.EnableEvents = True
     isRunning = False
     Exit Sub
-    
+
 CleanFail:
     Resume CleanExit
 End Sub
@@ -287,7 +287,7 @@ Private Sub UpdateScheduleForRow(ByVal r As Long)
 
     If Len(Trim$(freqStr)) = 0 Or Not IsDateValid(startDate) Then Exit Sub
     If IsDate(startDate) Then startMonth = Month(CDate(startDate)) Else startMonth = CLng(startDate)
-    
+
     ParseCodes freqStr, hasM, hasQ, hasS, hasA
     If hasA Then schedule(startMonth) = "A"
     If hasS Then
@@ -342,13 +342,13 @@ End Function
 Private Sub EnsureNoGoodMatchHighlight()
     Dim lastRow As Long, applies As Range, i As Long
     Dim previousSelection As Range
-    
+
     lastRow = Me.Cells(Me.Rows.count, "A").End(xlUp).Row
     If lastRow < 2 Then lastRow = 2
-    
+
     ' Target the formatting on BOTH Column B and Column C
     Set applies = Me.Range("B2:C" & lastRow)
-    
+
     ' =========================================================
     ' NEW: The "ActiveCell" Anchor Fix
     ' Excel shifts conditional formatting formulas if your cursor isn't on the top row!
@@ -356,7 +356,7 @@ Private Sub EnsureNoGoodMatchHighlight()
     ' =========================================================
     Set previousSelection = Selection
     Me.Range("B2").Select
-    
+
     ' 1. Scrape away the old formatting rules from Columns B and C
     For i = Me.Columns("B:C").FormatConditions.count To 1 Step -1
         If Me.Columns("B:C").FormatConditions(i).Type = 2 Then ' xlExpression
@@ -367,48 +367,47 @@ Private Sub EnsureNoGoodMatchHighlight()
             End If
         End If
     Next i
-    
+
     ' 2. The Watchdog Formulas
     Dim formulaOriginal As String
     Dim formulaNew As String
-    
+
     ' Your exact original conditions (Untouched)
     formulaOriginal = "=OR($B2=""No good match"", $B2=""No matching words"", $B2=""Click to Review Guess..."", $C2=""Requires AI"", $C2=""Check DB"", $C2=""AI Failed to Resolve"", AND(LEFT($C2,14)=""Multiple Rules"", ISERR(SEARCH(""Resolved"",$C2))), ISNUMBER(SEARCH(""Review AI Guess"",$C2)))"
-    
+
     ' The new conditions for Subtypes, Manual Fixes, and Search Results
-    formulaNew = "=OR($B2=""Subtype missing input"", ISNUMBER(SEARCH(""Click dropdown to view"", $B2)), $C2=""Requires human"", $C2=""Search Results"", $C2=""Invalid Entry"")"
-    
+    formulaNew = "=OR($B2=""Subtype missing input"", $B2=""Missing input phrase"", ISNUMBER(SEARCH(""Click dropdown to view"", $B2)), $C2=""Requires human"", $C2=""Search Results"", $C2=""Invalid Entry"")"
+
     ' Apply the original formula
     With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaOriginal)
         .Interior.Color = 65535 ' Solid Yellow
         .StopIfTrue = False
     End With
-    
+
     ' Apply the new formula
     With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaNew)
         .Interior.Color = 65535 ' Solid Yellow
         .StopIfTrue = False
     End With
-    
+
     ' Put the cursor back exactly where the user left it!
     previousSelection.Select
 End Sub
 
 Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
     If Intersect(Target, Me.Range("B:C")) Is Nothing Or Target.Row < 2 Or Target.Cells.count > 1 Then Exit Sub
-    
+
     Dim inputPhrase As String: inputPhrase = Trim(Me.Cells(Target.Row, "A").Value2)
     If inputPhrase = "" Then Exit Sub
-    
+
     ' 1. Stop Excel's default double-click jump
     Cancel = True
-    
+
     ' 2. THE SHIELD: Turn off events so typing "Thinking" doesn't trigger the Pivot Refresh!
     Application.EnableEvents = False
     Me.Cells(Target.Row, "C").Value = "AI Thinking..."
     Application.EnableEvents = True ' Turn it right back on
-    
+
     DoEvents
     Call Matcher.RunAISniper(Me, Target.Row, inputPhrase)
 End Sub
-
