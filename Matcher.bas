@@ -733,16 +733,16 @@ NextCand:
     End If
 
     Dim resultStr As String: resultStr = JoinNonEmpty(topPhrase, vbLf)
-    
-    ' --- NEW: STRICT CONFIDENCE CUTOFF ---
-    ' If we couldn't build a string, OR if the best score is under 75% confidence,
-    ' abandon the fuzzy guess and flag it for the Python AI.
+
+    ' --- STRICT CONFIDENCE CUTOFF & AI REDIRECT ---
     If resultStr = "" Or bestScore < 0.75 Then
+        ' Handles cases where no string could be built or score is too low
         outVal = "No good match"
         confVal = "Requires AI"
     Else
-        If collapseToSingle Then outVal = topPhrase(1) Else outVal = resultStr
-        confVal = confidence
+        ' INTERCEPT: Any final Fuzzy match above .75 redirects to AI
+        outVal = "No good match"
+        confVal = "AI Needed"
     End If
 End Sub
 ' ==========================================================
@@ -2211,38 +2211,35 @@ Private Sub LoadLearnedOverrides()
     Set mLearnedVocabSigBest = CreateObject("Scripting.Dictionary")
 
     lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
-    If lastRow < 2 Then
-        mLearnedLoaded = True
-        Exit Sub
-    End If
+    If lastRow >= 2 Then
+        arr = ws.Range("A2:E" & lastRow).Value2
+        For i = 1 To UBound(arr, 1)
+            normIn = CStr(arr(i, 1))
+            outP = CStr(arr(i, 2))
+            sig = CStr(arr(i, 3))
+            times = CLng(val(arr(i, 4)))
 
-    arr = ws.Range("A2:E" & lastRow).Value2
-    For i = 1 To UBound(arr, 1)
-        normIn = CStr(arr(i, 1))
-        outP = CStr(arr(i, 2))
-        sig = CStr(arr(i, 3))
-        times = CLng(val(arr(i, 4)))
+            If Len(normIn) > 0 And Len(outP) > 0 Then
+                mLearnedExact(normIn) = outP
 
-        If Len(normIn) > 0 And Len(outP) > 0 Then
-            mLearnedExact(normIn) = outP
-
-            vSig = GetVocabSignature(normIn)
-            If Len(vSig) > 0 Then
-                mLearnedVocabSigBest(vSig) = outP
-            End If
-        End If
-        If Len(sig) > 0 And Len(outP) > 0 Then
-            If Not mLearnedSigBest.Exists(sig) Then
-                mLearnedSigBest(sig) = outP
-                mLearnedSigCount(sig) = times
-            Else
-                 If times > CLng(mLearnedSigCount(sig)) Then
-                    mLearnedSigBest(sig) = outP
-                    mLearnedSigCount(sig) = times
+                vSig = GetVocabSignature(normIn)
+                If Len(vSig) > 0 Then
+                    mLearnedVocabSigBest(vSig) = outP
                 End If
             End If
-        End If
-    Next i
+            If Len(sig) > 0 And Len(outP) > 0 Then
+                If Not mLearnedSigBest.Exists(sig) Then
+                    mLearnedSigBest(sig) = outP
+                    mLearnedSigCount(sig) = times
+                Else
+                     If times > CLng(mLearnedSigCount(sig)) Then
+                        mLearnedSigBest(sig) = outP
+                        mLearnedSigCount(sig) = times
+                    End If
+                End If
+            End If
+        Next i
+    End If
     MigrateLocalLearningsToExternal
     ImportExternalData
 
@@ -2357,6 +2354,7 @@ Private Sub ImportExternalData()
     If Dir(p) = "" Then Exit Sub
     If mLearnedExact Is Nothing Then Set mLearnedExact = CreateObject("Scripting.Dictionary")
     If mLearnedSigBest Is Nothing Then Set mLearnedSigBest = CreateObject("Scripting.Dictionary")
+    If mLearnedVocabSigBest Is Nothing Then Set mLearnedVocabSigBest = CreateObject("Scripting.Dictionary")
     On Error Resume Next
     Err.Clear
     fNum = FreeFile
@@ -2373,6 +2371,11 @@ Private Sub ImportExternalData()
                 mExternalFileCache(cacheKey) = True
                 If Len(normIn) > 0 And Len(outP) > 0 Then
                     mLearnedExact(normIn) = outP
+                    Dim vSig As String
+                    vSig = GetVocabSignature(normIn)
+                    If Len(vSig) > 0 Then
+                        mLearnedVocabSigBest(vSig) = outP
+                    End If
                 End If
                 If Len(sig) > 0 And Len(outP) > 0 Then
                     mLearnedSigBest(sig) = outP
@@ -2388,7 +2391,7 @@ Private Function GetExternalRulesFilePath() As String
     GetExternalRulesFilePath = Environ("APPDATA") & "\Uniformat_Rules.txt"
 End Function
 
-Private Sub SyncRulesWithExternal(ByVal wb As Workbook, ByVal sheetName As String)
+Public Sub SyncRulesWithExternal(ByVal wb As Workbook, ByVal sheetName As String)
     Dim ws As Worksheet
     Dim p As String, lineStr As String
     Dim fNum As Integer
@@ -2588,6 +2591,7 @@ Public Sub DiagnoseMatcher()
     msg = msg & "Knows 'water'? " & mTokenIndex.Exists("water") & vbCrLf
     msg = msg & "Knows 'barrie'? " & mTokenIndex.Exists("barrie") & vbCrLf
     msg = msg & "Knows 'dom'? " & mTokenIndex.Exists("dom") & " (If False, aliases needed)"
+    msg = msg & "Knows 'domestic'? " & mTokenIndex.Exists("domestic") & vbCrLf
 
     MsgBox msg
 End Sub
@@ -2981,7 +2985,7 @@ Public Sub RunAIBulkCleanup()
                         ' ---------------------------------------------------------
                         ' THE NEW DROPDOWN DECISION ENGINE
                         ' ---------------------------------------------------------
-                        
+
                         ' 1. AI HYBRID GUESS (Yes/No)
                         If rId = "AI_HYBRID_MATCH" Then
                             ws.Cells(rRow, "C").Value = ChrW(9888) & " Review AI Guess"
@@ -2992,7 +2996,7 @@ Public Sub RunAIBulkCleanup()
                         ElseIf InStr(rMatch, "\n") > 0 Then
                             ws.Cells(rRow, "C").Value = rId & " (Multiple Options)"
                             ws.Cells(rRow, "B").Value = "Click to select rule..."
-                            
+
                             Dim multiArr() As String
                             multiArr = Split(rMatch, "\n")
                             Call CreateSelectionListForSingleRow_Fallback(ws, rRow, multiArr)
@@ -3235,7 +3239,7 @@ Private Sub ApplyDropdownToCell(ByVal cell As Range, ByVal listString As String)
     Err.Clear
     cell.Validation.Delete
     On Error GoTo 0
-    
+
     With cell.Validation
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=listString
         .IgnoreBlank = True
@@ -3253,20 +3257,20 @@ Public Function BuildSearchDropdown(wsInput As Worksheet, rowNum As Long, search
         BuildSearchDropdown = False
         Exit Function
     End If
-     
+
     ' Wake up the engine if it's sleeping
     If mLookupCount = 0 Then
         Dim wsL As Worksheet: Set wsL = GetLookupSheet()
         If Not wsL Is Nothing Then InitializeMatcher wsL
     End If
-     
+
     Dim results() As String
     Dim count As Long: count = 0
     ReDim results(0 To 49) ' Max 50 results to keep the UI snappy
-     
+
     Dim i As Long
     Dim sClean As String: sClean = LCase$(Trim$(searchStr))
-     
+
     ' Scan the lookup cache for the partial word
     For i = 1 To mLookupCount
         If Len(mLookupPhrases(i)) > 0 Then
@@ -3277,7 +3281,7 @@ Public Function BuildSearchDropdown(wsInput As Worksheet, rowNum As Long, search
             End If
         End If
     Next i
-     
+
     If count > 0 Then
         ReDim Preserve results(0 To count - 1)
         ' Route the results through your existing hidden picklist generator
@@ -3295,7 +3299,7 @@ Private Sub CreateSelectionListForSingleRow_Fallback(ByVal wsInput As Worksheet,
     Dim wsList As Worksheet, cell As Range
     Dim listName As String, itemCount As Long
     Dim rngList As Range
-            
+
     On Error Resume Next
     Err.Clear
     Set wsList = ThisWorkbook.Worksheets(PICK_SHEET_NAME)
@@ -3305,23 +3309,23 @@ Private Sub CreateSelectionListForSingleRow_Fallback(ByVal wsInput As Worksheet,
         wsList.Name = PICK_SHEET_NAME
     End If
     wsList.Visible = xlSheetHidden
-            
+
     Set cell = wsInput.Cells(rowNum, "B")
     itemCount = UBound(parts) - LBound(parts) + 1
     listName = "PickRow_" & rowNum
-     
+
     Set rngList = GetOrCreateListRange(wsList, listName, itemCount)
     Dim i As Long, p As Long: p = LBound(parts)
     For i = 1 To itemCount
         rngList.Cells(i, 1).Value = Trim$(parts(p))
         p = p + 1
     Next i
-                
+
     On Error Resume Next
     Err.Clear
     cell.Validation.Delete
     On Error GoTo 0
-     
+
     With cell.Validation
         ' Crucial fix: Added the single quotes around the sheet name!
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="='" & wsList.Name & "'!" & rngList.Address
