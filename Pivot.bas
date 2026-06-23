@@ -30,9 +30,6 @@ Public Sub PivotBuilder_Rebuild()
     Dim pt As PivotTable
     Dim panelStart As Range
     Dim startCol As Long
-    Dim currentScreen As Worksheet
-
-    Set currentScreen = ActiveSheet
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
@@ -87,12 +84,13 @@ Public Sub PivotBuilder_Rebuild()
         FldCost:=FLD_TOTAL_MATCOST
 
      ' 7. CLEAN UP
-    On Error Resume Next
-    currentScreen.Activate
-    If Err.Number <> 0 Then
-        wsPvt.Activate
-    End If
-    On Error GoTo 0
+    ' We no longer activate anything here to prevent screen jerking
+    ' On Error Resume Next
+    ' currentScreen.Activate
+    ' If Err.Number <> 0 Then
+    '    wsPvt.Activate
+    ' End If
+    ' On Error GoTo 0
 
     Application.EnableEvents = True
     Application.ScreenUpdating = True
@@ -119,6 +117,9 @@ Private Sub AutoFlattenData()
     lastRow = WsSrc.Cells(WsSrc.Rows.count, "A").End(xlUp).Row
     lastCol = WsSrc.Cells(1, WsSrc.Columns.count).End(xlToLeft).Column
 
+    Dim currentSheet As Worksheet
+    Set currentSheet = ActiveSheet
+
     ' --- CRITICAL FIX: Completely Nuke the Hidden Sheet to Destroy Ghost Data ---
     Application.DisplayAlerts = False
     On Error Resume Next
@@ -129,6 +130,9 @@ Private Sub AutoFlattenData()
     Set wsDest = ThisWorkbook.Sheets.Add(After:=WsSrc)
     wsDest.Name = FLAT_SHEET
     wsDest.Visible = xlSheetHidden
+
+    ' Quietly return user to where they were so Add doesn't hijack focus
+    currentSheet.Activate
 
     If lastRow < 2 Then
         ' Copy headers only and exit so pivot creates empty
@@ -237,13 +241,18 @@ Private Function CheckHeaders(ByVal src As Range, ByVal names As Variant) As Str
 End Function
 
 Private Function RecreatePivotSheet_safe(ByVal sheetName As String) As Worksheet
+    Dim ws As Worksheet
+    Dim currentSheet As Worksheet
+
+    ' Remember the currently active sheet to prevent jumping when Add activates the new sheet
+    Set currentSheet = ActiveSheet
+
     Application.DisplayAlerts = False
     On Error Resume Next
     ThisWorkbook.Worksheets(sheetName).Delete
     On Error GoTo 0
     Application.DisplayAlerts = True
 
-    Dim ws As Worksheet
     Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.count))
     On Error Resume Next
     ws.Name = sheetName
@@ -256,6 +265,9 @@ Private Function RecreatePivotSheet_safe(ByVal sheetName As String) As Worksheet
         .Range("H2").Value = "Refreshed on: " & Format(Now, "yyyy-mm-dd hh:nn")
         .Range("H2").Font.Italic = True
     End With
+
+    ' Quietly return the user to where they were
+    currentSheet.Activate
 
     Set RecreatePivotSheet_safe = ws
 End Function
