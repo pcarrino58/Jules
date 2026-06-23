@@ -117,22 +117,19 @@ Private Sub AutoFlattenData()
     lastRow = WsSrc.Cells(WsSrc.Rows.count, "A").End(xlUp).Row
     lastCol = WsSrc.Cells(1, WsSrc.Columns.count).End(xlToLeft).Column
 
-    Dim currentSheet As Worksheet
-    Set currentSheet = ActiveSheet
-
-    ' --- CRITICAL FIX: Completely Nuke the Hidden Sheet to Destroy Ghost Data ---
-    Application.DisplayAlerts = False
+    ' --- CRITICAL FIX: Stop deleting/adding sheets to prevent screen flash ---
     On Error Resume Next
-    ThisWorkbook.Sheets(FLAT_SHEET).Delete
+    Set wsDest = ThisWorkbook.Sheets(FLAT_SHEET)
     On Error GoTo 0
-    Application.DisplayAlerts = True
 
-    Set wsDest = ThisWorkbook.Sheets.Add(After:=WsSrc)
-    wsDest.Name = FLAT_SHEET
-    wsDest.Visible = xlSheetHidden
+    If wsDest Is Nothing Then
+        Set wsDest = ThisWorkbook.Sheets.Add(After:=WsSrc)
+        wsDest.Name = FLAT_SHEET
+        wsDest.Visible = xlSheetHidden
+    End If
 
-    ' Quietly return user to where they were so Add doesn't hijack focus
-    currentSheet.Activate
+    ' Clear the board instead of deleting the sheet
+    wsDest.Cells.Clear
 
     If lastRow < 2 Then
         ' Copy headers only and exit so pivot creates empty
@@ -242,21 +239,26 @@ End Function
 
 Private Function RecreatePivotSheet_safe(ByVal sheetName As String) As Worksheet
     Dim ws As Worksheet
-    Dim currentSheet As Worksheet
 
-    ' Remember the currently active sheet to prevent jumping when Add activates the new sheet
-    Set currentSheet = ActiveSheet
-
-    Application.DisplayAlerts = False
     On Error Resume Next
-    ThisWorkbook.Worksheets(sheetName).Delete
+    Set ws = ThisWorkbook.Worksheets(sheetName)
     On Error GoTo 0
-    Application.DisplayAlerts = True
 
-    Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.count))
-    On Error Resume Next
-    ws.Name = sheetName
-    On Error GoTo 0
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.count))
+        On Error Resume Next
+        ws.Name = sheetName
+        On Error GoTo 0
+    End If
+
+    ' Clear existing data instead of deleting and recreating the sheet
+    ws.Cells.Clear
+
+    ' Remove old PivotTables if they exist to prevent overlaps
+    Dim pt As PivotTable
+    For Each pt In ws.PivotTables
+        pt.TableRange2.Clear
+    Next pt
 
     With ws
         .Range("H1").Value = "Building x Who (Vertical) - Total Hours & Material Cost"
@@ -265,9 +267,6 @@ Private Function RecreatePivotSheet_safe(ByVal sheetName As String) As Worksheet
         .Range("H2").Value = "Refreshed on: " & Format(Now, "yyyy-mm-dd hh:nn")
         .Range("H2").Font.Italic = True
     End With
-
-    ' Quietly return the user to where they were
-    currentSheet.Activate
 
     Set RecreatePivotSheet_safe = ws
 End Function
