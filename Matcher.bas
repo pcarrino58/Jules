@@ -734,15 +734,15 @@ NextCand:
 
     Dim resultStr As String: resultStr = JoinNonEmpty(topPhrase, vbLf)
 
-    ' --- STRICT CONFIDENCE CUTOFF & AI REDIRECT ---
+    ' --- NEW: STRICT CONFIDENCE CUTOFF ---
+    ' If we couldn't build a string, OR if the best score is under 75% confidence,
+    ' abandon the fuzzy guess and flag it for the Python AI.
     If resultStr = "" Or bestScore < 0.75 Then
-        ' Handles cases where no string could be built or score is too low
         outVal = "No good match"
         confVal = "Requires AI"
     Else
-        ' INTERCEPT: Any final Fuzzy match above .75 redirects to AI
-        outVal = "No good match"
-        confVal = "AI Needed"
+        If collapseToSingle Then outVal = topPhrase(1) Else outVal = resultStr
+        confVal = confidence
     End If
 End Sub
 ' ==========================================================
@@ -2211,35 +2211,38 @@ Private Sub LoadLearnedOverrides()
     Set mLearnedVocabSigBest = CreateObject("Scripting.Dictionary")
 
     lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
-    If lastRow >= 2 Then
-        arr = ws.Range("A2:E" & lastRow).Value2
-        For i = 1 To UBound(arr, 1)
-            normIn = CStr(arr(i, 1))
-            outP = CStr(arr(i, 2))
-            sig = CStr(arr(i, 3))
-            times = CLng(val(arr(i, 4)))
+    If lastRow < 2 Then
+        mLearnedLoaded = True
+        Exit Sub
+    End If
 
-            If Len(normIn) > 0 And Len(outP) > 0 Then
-                mLearnedExact(normIn) = outP
+    arr = ws.Range("A2:E" & lastRow).Value2
+    For i = 1 To UBound(arr, 1)
+        normIn = CStr(arr(i, 1))
+        outP = CStr(arr(i, 2))
+        sig = CStr(arr(i, 3))
+        times = CLng(val(arr(i, 4)))
 
-                vSig = GetVocabSignature(normIn)
-                If Len(vSig) > 0 Then
-                    mLearnedVocabSigBest(vSig) = outP
-                End If
+        If Len(normIn) > 0 And Len(outP) > 0 Then
+            mLearnedExact(normIn) = outP
+
+            vSig = GetVocabSignature(normIn)
+            If Len(vSig) > 0 Then
+                mLearnedVocabSigBest(vSig) = outP
             End If
-            If Len(sig) > 0 And Len(outP) > 0 Then
-                If Not mLearnedSigBest.Exists(sig) Then
+        End If
+        If Len(sig) > 0 And Len(outP) > 0 Then
+            If Not mLearnedSigBest.Exists(sig) Then
+                mLearnedSigBest(sig) = outP
+                mLearnedSigCount(sig) = times
+            Else
+                 If times > CLng(mLearnedSigCount(sig)) Then
                     mLearnedSigBest(sig) = outP
                     mLearnedSigCount(sig) = times
-                Else
-                     If times > CLng(mLearnedSigCount(sig)) Then
-                        mLearnedSigBest(sig) = outP
-                        mLearnedSigCount(sig) = times
-                    End If
                 End If
             End If
-        Next i
-    End If
+        End If
+    Next i
     MigrateLocalLearningsToExternal
     ImportExternalData
 
@@ -2354,7 +2357,6 @@ Private Sub ImportExternalData()
     If Dir(p) = "" Then Exit Sub
     If mLearnedExact Is Nothing Then Set mLearnedExact = CreateObject("Scripting.Dictionary")
     If mLearnedSigBest Is Nothing Then Set mLearnedSigBest = CreateObject("Scripting.Dictionary")
-    If mLearnedVocabSigBest Is Nothing Then Set mLearnedVocabSigBest = CreateObject("Scripting.Dictionary")
     On Error Resume Next
     Err.Clear
     fNum = FreeFile
@@ -2371,11 +2373,6 @@ Private Sub ImportExternalData()
                 mExternalFileCache(cacheKey) = True
                 If Len(normIn) > 0 And Len(outP) > 0 Then
                     mLearnedExact(normIn) = outP
-                    Dim vSig As String
-                    vSig = GetVocabSignature(normIn)
-                    If Len(vSig) > 0 Then
-                        mLearnedVocabSigBest(vSig) = outP
-                    End If
                 End If
                 If Len(sig) > 0 And Len(outP) > 0 Then
                     mLearnedSigBest(sig) = outP
@@ -2391,7 +2388,7 @@ Private Function GetExternalRulesFilePath() As String
     GetExternalRulesFilePath = Environ("APPDATA") & "\Uniformat_Rules.txt"
 End Function
 
-Public Sub SyncRulesWithExternal(ByVal wb As Workbook, ByVal sheetName As String)
+Private Sub SyncRulesWithExternal(ByVal wb As Workbook, ByVal sheetName As String)
     Dim ws As Worksheet
     Dim p As String, lineStr As String
     Dim fNum As Integer
@@ -2591,7 +2588,6 @@ Public Sub DiagnoseMatcher()
     msg = msg & "Knows 'water'? " & mTokenIndex.Exists("water") & vbCrLf
     msg = msg & "Knows 'barrie'? " & mTokenIndex.Exists("barrie") & vbCrLf
     msg = msg & "Knows 'dom'? " & mTokenIndex.Exists("dom") & " (If False, aliases needed)"
-    msg = msg & "Knows 'domestic'? " & mTokenIndex.Exists("domestic") & vbCrLf
 
     MsgBox msg
 End Sub
