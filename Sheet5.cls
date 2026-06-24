@@ -341,7 +341,7 @@ Private Function IsDateValid(val As Variant) As Boolean
 End Function
 
 Private Sub EnsureNoGoodMatchHighlight()
-    Dim lastRow As Long, applies As Range, i As Long
+    Dim lastRow As Long, applies As Range
 
     lastRow = Me.Cells(Me.Rows.count, "A").End(xlUp).Row
     If lastRow < 2 Then lastRow = 2
@@ -349,55 +349,51 @@ Private Sub EnsureNoGoodMatchHighlight()
     ' Target the formatting on BOTH Column B and Column C
     Set applies = Me.Range("B2:C" & lastRow)
 
-    ' 1. Scrape away the old formatting rules from Columns B and C
-    For i = Me.Columns("B:C").FormatConditions.count To 1 Step -1
-        If Me.Columns("B:C").FormatConditions(i).Type = 2 Then ' xlExpression
-            ' We look for $B or $C in case Excel previously shifted the row numbers
-            If InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "$B", vbTextCompare) > 0 Or _
-               InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "$C", vbTextCompare) > 0 Or _
-               InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "RC2", vbTextCompare) > 0 Or _
-               InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "RC3", vbTextCompare) > 0 Then
-                Me.Columns("B:C").FormatConditions(i).Delete
-            End If
-        End If
-    Next i
+    ' 1. Clear overlapping fragmented rules reliably across the entire applies range
+    applies.FormatConditions.Delete
 
-    ' 2. The Watchdog Formulas
-    Dim formulaOriginal1 As String
-    Dim formulaOriginal2 As String
-    Dim formulaNew As String
-    Dim activeR As String
+    ' 2. The Watchdog Formulas (Written in R1C1 notation)
+    Dim formulaOriginal1_R1C1 As String
+    Dim formulaOriginal2_R1C1 As String
+    Dim formulaNew_R1C1 As String
 
+    ' We split the rules to avoid exceeding 255 character limit during conversion
+    formulaOriginal1_R1C1 = "=OR(RC2=""No good match"", RC2=""No matching words"", RC2=""Click to Review Guess..."", RC3=""Requires AI"")"
+    formulaOriginal2_R1C1 = "=OR(RC3=""Check DB"", RC3=""AI Failed to Resolve"", AND(LEFT(RC3,14)=""Multiple Rules"", ISERR(SEARCH(""Resolved"",RC3))), ISNUMBER(SEARCH(""Review AI Guess"",RC3)))"
+    formulaNew_R1C1 = "=OR(RC2=""Subtype missing input"", RC2=""Missing input phrase"", ISNUMBER(SEARCH(""Click dropdown to view"", RC2)), RC3=""Requires human"", RC3=""Search Results"", RC3=""Invalid Entry"")"
+
+    ' =========================================================
+    ' SAFE RELATIVE FORMATTING ANCHOR
+    ' FormatConditions.Add(Formula1:=...) evaluates A1 formulas relative to the ActiveCell,
+    ' not the AppliesTo range. We must convert the R1C1 formula to an A1 string
+    ' specifically calibrated for the current ActiveCell's offset.
+    ' =========================================================
+    Dim safeAnchor As Range
     On Error Resume Next
-    activeR = CStr(ActiveCell.Row)
-    If activeR = "" Then activeR = "2" ' Fallback if no ActiveCell
+    Set safeAnchor = ActiveCell
     On Error GoTo 0
+    If safeAnchor Is Nothing Then Set safeAnchor = applies.Cells(1, 1)
 
-    ' Split the exact original conditions to prevent exceeding 255 character limit when replacing [R] with large row numbers
-    formulaOriginal1 = "=OR($B[R]=""No good match"", $B[R]=""No matching words"", $B[R]=""Click to Review Guess..."", $C[R]=""Requires AI"")"
-    formulaOriginal2 = "=OR($C[R]=""Check DB"", $C[R]=""AI Failed to Resolve"", AND(LEFT($C[R],14)=""Multiple Rules"", ISERR(SEARCH(""Resolved"",$C[R]))), ISNUMBER(SEARCH(""Review AI Guess"",$C[R])))"
-
-    ' The new conditions for Subtypes, Manual Fixes, and Search Results
-    formulaNew = "=OR($B[R]=""Subtype missing input"", $B[R]=""Missing input phrase"", ISNUMBER(SEARCH(""Click dropdown to view"", $B[R])), $C[R]=""Requires human"", $C[R]=""Search Results"", $C[R]=""Invalid Entry"")"
-
-    formulaOriginal1 = Replace(formulaOriginal1, "[R]", activeR)
-    formulaOriginal2 = Replace(formulaOriginal2, "[R]", activeR)
-    formulaNew = Replace(formulaNew, "[R]", activeR)
+    ' Convert to A1 notation explicitly mapped for the ActiveCell offset
+    Dim frm1 As String, frm2 As String, frmNew As String
+    frm1 = Application.ConvertFormula(formulaOriginal1_R1C1, xlR1C1, xlA1, , safeAnchor)
+    frm2 = Application.ConvertFormula(formulaOriginal2_R1C1, xlR1C1, xlA1, , safeAnchor)
+    frmNew = Application.ConvertFormula(formulaNew_R1C1, xlR1C1, xlA1, , safeAnchor)
 
     ' Apply the first half of original formula
-    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaOriginal1)
+    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=frm1)
         .Interior.Color = 65535 ' Solid Yellow
         .StopIfTrue = False
     End With
 
     ' Apply the second half of original formula
-    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaOriginal2)
+    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=frm2)
         .Interior.Color = 65535 ' Solid Yellow
         .StopIfTrue = False
     End With
 
     ' Apply the new formula
-    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaNew)
+    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=frmNew)
         .Interior.Color = 65535 ' Solid Yellow
         .StopIfTrue = False
     End With
