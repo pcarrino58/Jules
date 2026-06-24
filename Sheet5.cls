@@ -342,7 +342,6 @@ End Function
 
 Private Sub EnsureNoGoodMatchHighlight()
     Dim lastRow As Long, applies As Range, i As Long
-    Dim previousSelection As Range
 
     lastRow = Me.Cells(Me.Rows.count, "A").End(xlUp).Row
     If lastRow < 2 Then lastRow = 2
@@ -350,37 +349,49 @@ Private Sub EnsureNoGoodMatchHighlight()
     ' Target the formatting on BOTH Column B and Column C
     Set applies = Me.Range("B2:C" & lastRow)
 
-    ' =========================================================
-    ' NEW: The "ActiveCell" Anchor Fix
-    ' Excel shifts conditional formatting formulas if your cursor isn't on the top row!
-    ' This parks the cursor on B2 just while writing the rule.
-    ' =========================================================
-    Set previousSelection = Selection
-    Me.Range("B2").Select
-
     ' 1. Scrape away the old formatting rules from Columns B and C
     For i = Me.Columns("B:C").FormatConditions.count To 1 Step -1
         If Me.Columns("B:C").FormatConditions(i).Type = 2 Then ' xlExpression
             ' We look for $B or $C in case Excel previously shifted the row numbers
             If InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "$B", vbTextCompare) > 0 Or _
-               InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "$C", vbTextCompare) > 0 Then
+               InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "$C", vbTextCompare) > 0 Or _
+               InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "RC2", vbTextCompare) > 0 Or _
+               InStr(1, Me.Columns("B:C").FormatConditions(i).Formula1, "RC3", vbTextCompare) > 0 Then
                 Me.Columns("B:C").FormatConditions(i).Delete
             End If
         End If
     Next i
 
     ' 2. The Watchdog Formulas
-    Dim formulaOriginal As String
+    Dim formulaOriginal1 As String
+    Dim formulaOriginal2 As String
     Dim formulaNew As String
+    Dim activeR As String
 
-    ' Your exact original conditions (Untouched)
-    formulaOriginal = "=OR($B2=""No good match"", $B2=""No matching words"", $B2=""Click to Review Guess..."", $C2=""Requires AI"", $C2=""Check DB"", $C2=""AI Failed to Resolve"", AND(LEFT($C2,14)=""Multiple Rules"", ISERR(SEARCH(""Resolved"",$C2))), ISNUMBER(SEARCH(""Review AI Guess"",$C2)))"
+    On Error Resume Next
+    activeR = CStr(ActiveCell.Row)
+    If activeR = "" Then activeR = "2" ' Fallback if no ActiveCell
+    On Error GoTo 0
+
+    ' Split the exact original conditions to prevent exceeding 255 character limit when replacing [R] with large row numbers
+    formulaOriginal1 = "=OR($B[R]=""No good match"", $B[R]=""No matching words"", $B[R]=""Click to Review Guess..."", $C[R]=""Requires AI"")"
+    formulaOriginal2 = "=OR($C[R]=""Check DB"", $C[R]=""AI Failed to Resolve"", AND(LEFT($C[R],14)=""Multiple Rules"", ISERR(SEARCH(""Resolved"",$C[R]))), ISNUMBER(SEARCH(""Review AI Guess"",$C[R])))"
 
     ' The new conditions for Subtypes, Manual Fixes, and Search Results
-    formulaNew = "=OR($B2=""Subtype missing input"", $B2=""Missing input phrase"", ISNUMBER(SEARCH(""Click dropdown to view"", $B2)), $C2=""Requires human"", $C2=""Search Results"", $C2=""Invalid Entry"")"
+    formulaNew = "=OR($B[R]=""Subtype missing input"", $B[R]=""Missing input phrase"", ISNUMBER(SEARCH(""Click dropdown to view"", $B[R])), $C[R]=""Requires human"", $C[R]=""Search Results"", $C[R]=""Invalid Entry"")"
 
-    ' Apply the original formula
-    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaOriginal)
+    formulaOriginal1 = Replace(formulaOriginal1, "[R]", activeR)
+    formulaOriginal2 = Replace(formulaOriginal2, "[R]", activeR)
+    formulaNew = Replace(formulaNew, "[R]", activeR)
+
+    ' Apply the first half of original formula
+    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaOriginal1)
+        .Interior.Color = 65535 ' Solid Yellow
+        .StopIfTrue = False
+    End With
+
+    ' Apply the second half of original formula
+    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaOriginal2)
         .Interior.Color = 65535 ' Solid Yellow
         .StopIfTrue = False
     End With
@@ -390,9 +401,6 @@ Private Sub EnsureNoGoodMatchHighlight()
         .Interior.Color = 65535 ' Solid Yellow
         .StopIfTrue = False
     End With
-
-    ' Put the cursor back exactly where the user left it!
-    previousSelection.Select
 End Sub
 
 Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
@@ -412,4 +420,3 @@ Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean
     DoEvents
     Call Matcher.RunAISniper(Me, Target.Row, inputPhrase)
 End Sub
-
