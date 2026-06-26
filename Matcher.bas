@@ -2432,6 +2432,44 @@ Public Sub SyncRulesWithExternal(ByVal wb As Workbook, ByVal sheetName As String
     Close #fNum
 End Sub
 
+Public Sub SyncLearningsWithExternal(ByVal wb As Workbook, ByVal sheetName As String)
+    Dim ws As Worksheet
+    Dim p As String, lineStr As String
+    Dim fNum As Integer
+    Dim r As Long, lastRow As Long
+
+    ' 1. Locate the LearnedMappings Sheet
+    On Error Resume Next
+    Err.Clear
+    Set ws = wb.Worksheets(sheetName)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+
+    ' 2. Get the file path for the backup text file
+    p = GetExternalFilePath()
+
+    ' 3. Find the last row of data in the Excel sheet
+    lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
+
+    ' 4. Open the text file to overwrite it entirely (Output mode clears the file)
+    fNum = FreeFile
+    Open p For Output As #fNum
+
+    ' 5. Loop through the Excel sheet and write every learning to the text file
+    If lastRow >= 2 Then
+        For r = 2 To lastRow
+            lineStr = Trim$(CStr(ws.Cells(r, "A").Value)) & "|" & _
+                      Trim$(CStr(ws.Cells(r, "B").Value)) & "|" & _
+                      Trim$(CStr(ws.Cells(r, "C").Value)) & "|" & _
+                      Now
+            Print #fNum, lineStr
+        Next r
+    End If
+
+    ' 6. Close and release the file
+    Close #fNum
+End Sub
+
 Private Sub LoadRulesFromSheet(ByVal wb As Workbook, ByVal sheetName As String, _
     ByVal aliasDict As Object, ByVal phraseMap As Object, _
     ByVal stopWords As Object, ByVal boostDict As Object, _

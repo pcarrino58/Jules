@@ -57,6 +57,12 @@ DoneHandler:
         Application.DisplayAlerts = True
         Application.EnableEvents = True
         Application.ScreenUpdating = True
+    ElseIf Sh.Name = "Rules Sheet" Then
+        ' Sync dynamically
+        Matcher.SyncRulesWithExternal Me, "Rules Sheet"
+    ElseIf Sh.Name = "LearnedMappings" Then
+        ' Sync dynamically
+        Matcher.SyncLearningsWithExternal Me, "LearnedMappings"
     End If
 End Sub
 
@@ -67,4 +73,14 @@ End Sub
 Private Sub Workbook_Open()
     ' Automatically clean up temporary dropdown ranges on open
     Matcher.CleanupOrphanedPickLists
+
+    ' Perform Static Startup Sync
+    Matcher.SyncRulesWithExternal Me, "Rules Sheet"
+    Matcher.SyncLearningsWithExternal Me, "LearnedMappings"
+End Sub
+
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    ' Perform Static Shutdown Sync
+    Matcher.SyncRulesWithExternal Me, "Rules Sheet"
+    Matcher.SyncLearningsWithExternal Me, "LearnedMappings"
 End Sub
