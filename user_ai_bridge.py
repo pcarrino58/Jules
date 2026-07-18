@@ -186,6 +186,20 @@ def clean_contractor_noise(text):
     text = RE_NON_ALPHA.sub(' ', text)
     return RE_SPACES.sub(' ', text).strip()
 
+def get_generalized_signature(text):
+    """Aggressively strips sequence numbers, trailing letters, and codes (e.g., '#1', '1A', 'A', 'Tank2')"""
+    # Detach numbers that are crammed against words (e.g., "unit2a" -> "unit 2a")
+    text = re.sub(r'([a-z])([0-9]+[a-z]*)$', r'\1 \2', text)
+
+    # Repeatedly shave off trailing numbers, single letters, or alphanumeric codes
+    while True:
+        new_text = RE_TRAILING_NOISE.sub('', text).strip() # Fixed the name here
+        if new_text == text:
+            break
+        text = new_text
+
+    return text.strip()
+
 # ==========================================
 # 3. THE ENDPOINTS
 # ==========================================
@@ -335,9 +349,8 @@ def batch_lookup():
 
                     substring_bonus = 0.1 if lookup_candidate in signature else 0.0
 
-                    intersection = len(base_words.intersection(lookup_words))
-                    if len(base_words) + len(lookup_words) > 0:
-                        overlap = (2.0 * intersection) / (len(base_words) + len(lookup_words))
+                    if len(lookup_words) > 0:
+                        overlap = len(base_words.intersection(lookup_words)) / len(lookup_words)
                     else:
                         overlap = 0.0
 
@@ -445,9 +458,8 @@ def batch_file():
 
                     substring_bonus = 0.1 if lookup_candidate in signature else 0.0
 
-                    intersection = len(base_words.intersection(lookup_words))
-                    if len(base_words) + len(lookup_words) > 0:
-                        overlap = (2.0 * intersection) / (len(base_words) + len(lookup_words))
+                    if len(lookup_words) > 0:
+                        overlap = len(base_words.intersection(lookup_words)) / len(lookup_words)
                     else:
                         overlap = 0.0
 

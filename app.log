@@ -1,0 +1,15 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading Pure Semantic Math Engine...
+Engine forcing hardware acceleration on: [CPU]
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 1863.72it/s]
+WARNING: No .xltm files found in C:\Users\pcarr\OneDrive\Documents\Custom Office Templates
+WARNING:  not found!
+Pre-computing word sets for overlap scoring...
+Calculating vectors for lookup phrases...
+Knowledge Base Engine Ready!
+ * Serving Flask app 'ai_bridge'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [18/Jul/2026 19:02:51] "POST /batch_lookup HTTP/1.1" 200 -
