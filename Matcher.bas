@@ -2748,25 +2748,39 @@ Public Sub PropagateLearnedChoice(ByVal ws As Worksheet, ByVal sourceRow As Long
     Application.ScreenUpdating = False
     Application.EnableEvents = False
 
+    Dim arrData As Variant
+    arrData = ws.Range("A1:C" & lastRow).Value2
+
+    Dim rowsToUpdate As Object
+    Set rowsToUpdate = CreateObject("Scripting.Dictionary")
+
     For r = 2 To lastRow
         If r <> sourceRow Then
-            raw = CStr(ws.Cells(r, "A").Value2)
+            raw = CStr(arrData(r, 1))
             If Len(Trim$(raw)) > 0 Then
                 norm = NormalizeAndAlias(raw, mAliasDict)
                 rowSig = BuildLearnSignature(norm)
 
                 If (Len(targetSig) > 0 And rowSig = targetSig) Or (norm = targetNorm) Then
-                    ws.Cells(r, "B").Value2 = chosenOut
-                    ws.Cells(r, "C").Value2 = "Auto-Propagated"
-
-                    On Error Resume Next
-    Err.Clear
-                    ws.Cells(r, "B").Validation.Delete
-                    On Error GoTo 0
+                    arrData(r, 2) = chosenOut
+                    arrData(r, 3) = "Auto-Propagated"
+                    rowsToUpdate(r) = True
                 End If
             End If
         End If
     Next r
+
+    ws.Range("A1:C" & lastRow).Value2 = arrData
+
+    If rowsToUpdate.count > 0 Then
+        Dim k As Variant
+        For Each k In rowsToUpdate.keys
+            On Error Resume Next
+            Err.Clear
+            ws.Cells(CLng(k), 2).Validation.Delete
+            On Error GoTo 0
+        Next k
+    End If
 
 SafeExit:
     ' Restore the state to exactly what it was before this function ran
@@ -3061,35 +3075,17 @@ Public Sub RunAIBulkCleanup()
             DoEvents
             
             Dim k As Variant, mArr() As String
-            Dim rngYellow As Range
             
             For Each k In aiGuesses.keys
                 ApplyDropdownToCell ws.Cells(val(k), "B"), aiGuesses(k) & ",Reject AI Guess"
-                
-                ' --- BATCH PAINTING: Add cell to the Union Range ---
-                If rngYellow Is Nothing Then
-                    Set rngYellow = ws.Range("B" & val(k) & ":C" & val(k))
-                Else
-                    Set rngYellow = Union(rngYellow, ws.Range("B" & val(k) & ":C" & val(k)))
-                End If
+                ws.Range("B" & val(k) & ":C" & val(k)).Interior.Color = RGB(255, 255, 0)
             Next k
             
             For Each k In multiRules.keys
                 mArr = Split(multiRules(k), vbLf)
                 Call CreateSelectionListForSingleRow_Fallback(ws, val(k), mArr)
-                
-                ' --- BATCH PAINTING: Add cell to the Union Range ---
-                If rngYellow Is Nothing Then
-                    Set rngYellow = ws.Range("B" & val(k) & ":C" & val(k))
-                Else
-                    Set rngYellow = Union(rngYellow, ws.Range("B" & val(k) & ":C" & val(k)))
-                End If
+                ws.Range("B" & val(k) & ":C" & val(k)).Interior.Color = RGB(255, 255, 0)
             Next k
-            
-            ' --- BATCH PAINTING: Paint all yellow cells simultaneously ---
-            If Not rngYellow Is Nothing Then
-                rngYellow.Interior.Color = RGB(255, 255, 0)
-            End If
             
         End If
     End If

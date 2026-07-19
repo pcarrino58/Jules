@@ -168,24 +168,40 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                     Dim signatureTarget As String
                     signatureTarget = get_generalized_signature(LCase(rawInput))
 
-                    For propR = 2 To propLast
-                        If propR <> rowKey Then
-                            ' --- NEW: Shave the candidate row down to compare ---
-                            Dim candidateInput As String
-                            candidateInput = LCase(Trim$(CStr(Me.Cells(propR, 1).Value2)))
-                            
-                            ' If the shaved signatures match perfectly, update the row!
-                            If get_generalized_signature(candidateInput) = signatureTarget Then
-                                Me.Cells(propR, 2).Value2 = valToLearn
-                                Me.Cells(propR, 3).Value2 = "USER_LEARNED"
-                                Me.Range("B" & propR & ":C" & propR).Interior.Color = RGB(252, 186, 186)
+                    If propLast >= 2 Then
+                        Dim arrData As Variant
+                        arrData = Me.Range("A1:C" & propLast).Value2
+
+                        Dim rowsToUpdate As Object
+                        Set rowsToUpdate = CreateObject("Scripting.Dictionary")
+
+                        For propR = 2 To propLast
+                            If propR <> rowKey Then
+                                ' --- NEW: Shave the candidate row down to compare ---
+                                Dim candidateInput As String
+                                candidateInput = LCase(Trim$(CStr(arrData(propR, 1))))
                                 
-                                On Error Resume Next
-                                Me.Cells(propR, 2).Validation.Delete
-                                On Error GoTo CleanFail
+                                ' If the shaved signatures match perfectly, update the row!
+                                If get_generalized_signature(candidateInput) = signatureTarget Then
+                                    arrData(propR, 2) = valToLearn
+                                    arrData(propR, 3) = "USER_LEARNED"
+                                    rowsToUpdate(propR) = True
+                                End If
                             End If
+                        Next propR
+
+                        Me.Range("A1:C" & propLast).Value2 = arrData
+
+                        If rowsToUpdate.count > 0 Then
+                            Dim k As Variant
+                            For Each k In rowsToUpdate.keys
+                                Me.Range("B" & CLng(k) & ":C" & CLng(k)).Interior.Color = RGB(252, 186, 186)
+                                On Error Resume Next
+                                Me.Cells(CLng(k), 2).Validation.Delete
+                                On Error GoTo CleanFail
+                            Next k
                         End If
-                    Next propR
+                    End If
                 End If
                 
             End If
