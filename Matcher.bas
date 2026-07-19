@@ -48,7 +48,7 @@ Private mCategoryDict As Object
 Private mCategoryKeys() As String
 Private mCategoryCount As Long
 Private mCategoryAliasIndex As Object
-Private mRegEx As Object
+Private mRegexDict As Object
 Private mExternalFileCache As Object
 
 ' Learned Overrides
@@ -249,15 +249,27 @@ Public Sub RecordLearnedOverride(ByVal rowNum As Long)
         End If
 
         lastRow = wsLearn.Cells(wsLearn.Rows.count, "A").End(xlUp).Row
-        If lastRow < 2 Then lastRow = 1
+        Dim lArr As Variant
+        Dim foundRow As Long: foundRow = 0
+        Dim j As Long
 
-        Set f = wsLearn.Range("A2:A" & lastRow).Find(What:=normalized, LookIn:=xlValues, LookAt:=xlWhole)
-        If Not f Is Nothing Then
-            wsLearn.Cells(f.Row, "B").Value2 = chosen
-            wsLearn.Cells(f.Row, "C").Value2 = sig
-            wsLearn.Cells(f.Row, "D").Value2 = CLng(val(wsLearn.Cells(f.Row, "D").Value2)) + 1
-            wsLearn.Cells(f.Row, "E").Value2 = Now
+        If lastRow >= 2 Then
+            lArr = wsLearn.Range("A1:E" & lastRow).Value2
+            For j = 2 To lastRow
+                If CStr(lArr(j, 1)) = normalized Then
+                    foundRow = j
+                    Exit For
+                End If
+            Next j
+        End If
+
+        If foundRow > 0 Then
+            wsLearn.Cells(foundRow, "B").Value2 = chosen
+            wsLearn.Cells(foundRow, "C").Value2 = sig
+            wsLearn.Cells(foundRow, "D").Value2 = CLng(val(wsLearn.Cells(foundRow, "D").Value2)) + 1
+            wsLearn.Cells(foundRow, "E").Value2 = Now
         Else
+            If lastRow < 1 Then lastRow = 1
             wsLearn.Cells(lastRow + 1, "A").Value2 = normalized
             wsLearn.Cells(lastRow + 1, "B").Value2 = chosen
             wsLearn.Cells(lastRow + 1, "C").Value2 = sig
@@ -1173,22 +1185,15 @@ Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Objec
     t = Replace(t, "{", " ")
     t = Replace(t, "}", " ")
 
-    If mRegEx Is Nothing Then
-        Set mRegEx = CreateObject("VBScript.RegExp")
-        With mRegEx
-            .Global = True
-            .IgnoreCase = True
-        End With
-    End If
+    Dim reDim As Object, reNumLet As Object, reLetNum As Object
+    Set reDim = GetRegex("(\d)x(\d)")
+    If reDim.Test(t) Then t = reDim.Replace(t, "$1 x $2")
 
-    With mRegEx
-        .Pattern = "(\d)x(\d)"
-        If .Test(t) Then t = .Replace(t, "$1 x $2")
-        .Pattern = "([a-z])(\d)"
-        If .Test(t) Then t = .Replace(t, "$1 $2")
-        .Pattern = "(\d)([a-z])"
-        If .Test(t) Then t = .Replace(t, "$1 $2")
-    End With
+    Set reLetNum = GetRegex("([a-z])(\d)")
+    If reLetNum.Test(t) Then t = reLetNum.Replace(t, "$1 $2")
+
+    Set reNumLet = GetRegex("(\d)([a-z])")
+    If reNumLet.Test(t) Then t = reNumLet.Replace(t, "$1 $2")
 
     t = Replace(t, "/", " / ")
     t = Replace(t, ",", " ")
@@ -1230,10 +1235,9 @@ Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Objec
     End If
 
     ' STRICT ALPHA-ONLY FILTER
-    With mRegEx
-        .Pattern = "[^a-z ]"
-        t = .Replace(t, " ")
-    End With
+    Dim reAlpha As Object
+    Set reAlpha = GetRegex("[^a-z ]")
+    t = reAlpha.Replace(t, " ")
     t = Application.WorksheetFunction.Trim(t)
 
     Dim parts() As String, out() As String, i As Long, tok As String, n As Long
@@ -1665,23 +1669,31 @@ Private Function CandidateContainsCategory(ByVal candDict As Object, ByVal categ
 End Function
 
 Private Function GetCategoryItemsList(ByVal catName As String) As String
-    Dim res As String
     Dim count As Long
     Dim key As Variant
     If mCategoryDict Is Nothing Then Exit Function
     If Not mCategoryDict.Exists(catName) Then Exit Function
     Dim d As Object: Set d = mCategoryDict(catName)
+
+    Dim arr(0 To 30) As String
     count = 0
     For Each key In d.keys
         If count < 30 Then
-            If res = "" Then res = key Else res = res & vbLf & key
+            arr(count) = CStr(key)
             count = count + 1
         Else
-            res = res & vbLf & "... (More items in category)"
+            arr(count) = "... (More items in category)"
+            count = count + 1
             Exit For
         End If
     Next key
-    GetCategoryItemsList = res
+
+    If count > 0 Then
+        ReDim Preserve arr(0 To count - 1)
+        GetCategoryItemsList = Join(arr, vbLf)
+    Else
+        GetCategoryItemsList = ""
+    End If
 End Function
 
 Private Function GetDominantCategory(ByVal token As String) As String
@@ -3188,18 +3200,12 @@ Public Function CleanPastedOutput(ByVal txt As String) As String
     parts = Split(txt, vbLf)
 
     ' --- COMPILE REGEX OUTSIDE THE LOOP ---
-    If mRegEx Is Nothing Then
-        Set mRegEx = CreateObject("VBScript.RegExp")
-    End If
-    With mRegEx
-        .Global = True
-        .IgnoreCase = True
-        .Pattern = "[\x00-\x09\x0B-\x0C\x0E-\x1F]"
-    End With
+    Dim reControl As Object
+    Set reControl = GetRegex("[\x00-\x09\x0B-\x0C\x0E-\x1F]")
 
     For i = LBound(parts) To UBound(parts)
         ' Execute regex replace
-        parts(i) = mRegEx.Replace(parts(i), vbNullString)
+        parts(i) = reControl.Replace(parts(i), vbNullString)
 
         ' Pure VBA Trim and Double-Space removal
         parts(i) = Trim$(parts(i))
@@ -3419,6 +3425,24 @@ Private Sub CreateSelectionListForSingleRow_Fallback(ByVal wsInput As Worksheet,
 End Sub
 
 ' ==========================================================
+' NEW: GetRegex (Regex Caching)
+' ==========================================================
+Private Function GetRegex(ByVal pattern As String) As Object
+    If mRegexDict Is Nothing Then
+        Set mRegexDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not mRegexDict.Exists(pattern) Then
+        Dim re As Object
+        Set re = CreateObject("VBScript.RegExp")
+        re.Global = True
+        re.IgnoreCase = True
+        re.Pattern = pattern
+        Set mRegexDict(pattern) = re
+    End If
+    Set GetRegex = mRegexDict(pattern)
+End Function
+
+' ==========================================================
 ' NEW: FlushMemory (Garbage Collection)
 ' ==========================================================
 Private Sub FlushMemory()
@@ -3441,6 +3465,7 @@ Private Sub FlushMemory()
     Set mSignatureDict = Nothing
     Set mCategoryDict = Nothing
     Set mCategoryAliasIndex = Nothing
+    Set mRegexDict = Nothing
     Set mExternalFileCache = Nothing
     Set mLearnedExact = Nothing
     Set mLearnedSigBest = Nothing
