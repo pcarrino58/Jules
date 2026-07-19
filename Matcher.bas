@@ -1185,9 +1185,9 @@ Public Function NormalizeAndAlias(ByVal text As String, ByVal aliasDict As Objec
     t = Replace(t, "{", " ")
     t = Replace(t, "}", " ")
 
-    Dim reDim As Object, reNumLet As Object, reLetNum As Object
-    Set reDim = GetRegex("(\d)x(\d)")
-    If reDim.Test(t) Then t = reDim.Replace(t, "$1 x $2")
+    Dim rxDim As Object, reNumLet As Object, reLetNum As Object
+    Set rxDim = GetRegex("(\d)x(\d)")
+    If rxDim.Test(t) Then t = rxDim.Replace(t, "$1 x $2")
 
     Set reLetNum = GetRegex("([a-z])(\d)")
     If reLetNum.Test(t) Then t = reLetNum.Replace(t, "$1 $2")
@@ -1675,7 +1675,8 @@ Private Function GetCategoryItemsList(ByVal catName As String) As String
     If Not mCategoryDict.Exists(catName) Then Exit Function
     Dim d As Object: Set d = mCategoryDict(catName)
 
-    Dim arr(0 To 30) As String
+    Dim arr() As String
+    ReDim arr(0 To 30)
     count = 0
     For Each key In d.keys
         If count < 30 Then
