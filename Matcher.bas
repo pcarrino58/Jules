@@ -301,20 +301,29 @@ Public Function IsValidOutputList(ByVal outP As String) As Boolean
         If Not wsL Is Nothing Then InitializeMatcher wsL
     End If
 
-    If mLookupPhraseSet Is Nothing Then Exit Function
+    If mLookupPhraseSet Is Nothing Then
+        IsValidOutputList = False
+        Exit Function
+    End If
 
     outP = Replace(outP, vbCrLf, vbLf)
     outP = Replace(outP, vbCr, vbLf)
     outP = Trim$(outP)
 
-    If Len(outP) = 0 Then Exit Function
+    If Len(outP) = 0 Then
+        IsValidOutputList = False
+        Exit Function
+    End If
 
     parts = Split(outP, vbLf)
 
     For i = LBound(parts) To UBound(parts)
         s = GetStandardKey(parts(i))
         If Len(s) > 0 Then
-            If Not mLookupPhraseSet.Exists(s) Then Exit Function
+            If Not mLookupPhraseSet.Exists(s) Then
+                IsValidOutputList = False
+                Exit Function
+            End If
         End If
     Next i
 
@@ -853,7 +862,9 @@ Private Sub InitializeMatcher(wsLookup As Worksheet)
     FlushMemory '<--- NEW: Purge old memory before loading fresh data
     MIN_MATCH_THRESHOLD = 0.5
     mLearnedLoaded = False ' Force reload of learned data
-    ' ... (rest of the sub remains the same)
+
+    If mAliasDict Is Nothing Then EnsureDictionaries
+    BuildLookupCache wsLookup
 End Sub
 
 Private Function CheckExactLookupMatch(ByVal rawInput As String, ByVal normInput As String, ByRef outVal As String, ByRef confVal As String) As Boolean
