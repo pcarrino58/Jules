@@ -60,6 +60,7 @@ def get_stemmed_words(text):
 
 def get_generalized_signature(text):
     text = re.sub(r'([a-z])([0-9]+[a-z]*)$', r'\1 \2', text)
+    text = re.sub(r'^[a-z][0-9]+\s+', '', text).strip()
     while True:
         new_text = RE_TRAILING_NOISE.sub('', text).strip()
         if new_text == text:

@@ -187,14 +187,14 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                         
                         ' Clean the target phrase to compare against
                         Dim cleanTarget As String
-                        cleanTarget = LCase(Trim(rawInput))
+                        cleanTarget = get_generalized_signature(LCase(Trim(rawInput)))
 
                         For propR = 2 To propLast
                             If propR <> rowKey Then
                                 Dim candidateInput As String
-                                candidateInput = LCase(Trim(CStr(arrData(propR, 1))))
+                                candidateInput = get_generalized_signature(LCase(Trim(CStr(arrData(propR, 1)))))
                                 
-                                ' If it is an identical text match, auto-fill it instantly
+                                ' If it is an identical generalized match, auto-fill it instantly
                                 If Len(candidateInput) > 0 And candidateInput = cleanTarget Then
                                     arrData(propR, 2) = valToLearn
                                     arrData(propR, 3) = "USER_LEARNED"
@@ -271,6 +271,14 @@ Function get_generalized_signature(text As String) As String
     Dim prevText As String
     text = Trim(text)
     
+    ' First separate trailing alphanumeric combined with letters (e.g. EXHAUST1 -> EXHAUST 1)
+    regEx.pattern = "([a-zA-Z])([0-9]+[a-zA-Z]*)$"
+    text = regEx.Replace(text, "$1 $2")
+
+    ' Fix for P1, P2 prefixes (User request)
+    regEx.pattern = "^[a-zA-Z][0-9]+\s+"
+    text = Trim(regEx.Replace(text, ""))
+
     Do
         prevText = text
         ' Aggressively strip spaces, #, and trailing alphanumeric codes (e.g., " #1", "2B")
