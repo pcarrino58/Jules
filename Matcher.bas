@@ -306,6 +306,12 @@ Public Function IsValidOutputList(ByVal outP As String) As Boolean
         Exit Function
     End If
 
+    ' Allow the exact text of "Reject AI Guess" to bypass
+    If LCase$(Trim$(outP)) = "reject ai guess" Then
+        IsValidOutputList = True
+        Exit Function
+    End If
+
     outP = Replace(outP, vbCrLf, vbLf)
     outP = Replace(outP, vbCr, vbLf)
     outP = Trim$(outP)

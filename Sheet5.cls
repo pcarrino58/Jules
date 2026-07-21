@@ -135,6 +135,33 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                 
                 On Error Resume Next
                 isValid = Matcher.IsValidOutputList(valToLearn)
+                If Not isValid Then
+                    ' Fix: check if it came from the validation list (dropdown)
+                    Dim vList As String
+                    On Error Resume Next
+                    vList = Me.Cells(rowKey, "B").Validation.Formula1
+                    On Error GoTo ErrorHandler
+
+                    If Len(vList) > 0 Then
+                        If InStr(1, vList, valToLearn, vbTextCompare) > 0 Then
+                            isValid = True
+                        End If
+                    End If
+
+                    ' Fallback: re-evaluate the original input to see if this was a valid multiple rules choice
+                    If Not isValid Then
+                        Dim rawA As String, outA As String, confA As String
+                        rawA = Trim$(CStr(Me.Cells(rowKey, "A").Value2))
+                        If Len(rawA) > 0 Then
+                            Call Matcher.GetBestMatchForInput(rawA, outA, confA)
+                            If InStr(1, confA, "Multiple Rules", vbTextCompare) > 0 Or confA = "AI_HYBRID_MATCH" Then
+                                If InStr(1, outA, valToLearn, vbTextCompare) > 0 Then
+                                    isValid = True
+                                End If
+                            End If
+                        End If
+                    End If
+                End If
                 On Error GoTo ErrorHandler
                 
                 If isValid = False Then
@@ -263,10 +290,12 @@ End Sub
 ' ============================================================
 Function get_generalized_signature(text As String) As String
     ' A perfectly mirrored VBA clone of your Python Generalizer
-    Dim regEx As Object
-    Set regEx = CreateObject("VBScript.RegExp")
-    regEx.Global = True
-    regEx.IgnoreCase = True
+    Static regEx As Object
+    If regEx Is Nothing Then
+        Set regEx = CreateObject("VBScript.RegExp")
+        regEx.Global = True
+        regEx.IgnoreCase = True
+    End If
     
     Dim prevText As String
     text = Trim(text)
