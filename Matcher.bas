@@ -853,7 +853,8 @@ Private Sub InitializeMatcher(wsLookup As Worksheet)
     FlushMemory '<--- NEW: Purge old memory before loading fresh data
     MIN_MATCH_THRESHOLD = 0.5
     mLearnedLoaded = False ' Force reload of learned data
-    ' ... (rest of the sub remains the same)
+    EnsureDictionaries
+    BuildLookupCache wsLookup
 End Sub
 
 Private Function CheckExactLookupMatch(ByVal rawInput As String, ByVal normInput As String, ByRef outVal As String, ByRef confVal As String) As Boolean
