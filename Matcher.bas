@@ -409,7 +409,7 @@ Private Function SheetExists(ByVal sheetName As String) As Boolean
     SheetExists = Not ws Is Nothing
 End Function
 
-Private Sub GetBestMatchForInput(ByVal rawInput As String, ByRef outVal As String, ByRef confVal As String)
+Public Sub GetBestMatchForInput(ByVal rawInput As String, ByRef outVal As String, ByRef confVal As String)
     Dim normalizedInput As String
     Dim filteredInput As String
     Dim cleanRaw As String
