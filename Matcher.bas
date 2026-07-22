@@ -3104,44 +3104,26 @@ Public Sub RunAIBulkCleanup()
             DoEvents
             
             Dim k As Variant, mArr() As String
-            Dim rngYellow As Range
             
             For Each k In aiGuesses.keys
                 ApplyDropdownToCell ws.Cells(val(k), "B"), aiGuesses(k) & ",Reject AI Guess"
                 
-                ' --- BATCH PAINTING: Add cell to the Union Range ---
-                If rngYellow Is Nothing Then
-                    Set rngYellow = ws.Range("B" & val(k) & ":C" & val(k))
-                Else
-                    Set rngYellow = Union(rngYellow, ws.Range("B" & val(k) & ":C" & val(k)))
-                End If
+                ' --- APPLY PAINT DIRECTLY ---
+                ws.Range("B" & val(k) & ":C" & val(k)).Interior.Color = RGB(255, 255, 0)
             Next k
             
             For Each k In multiRules.keys
                 mArr = Split(multiRules(k), vbLf)
                 Call CreateSelectionListForSingleRow_Fallback(ws, val(k), mArr)
                 
-                ' --- BATCH PAINTING: Add cell to the Union Range ---
-                If rngYellow Is Nothing Then
-                    Set rngYellow = ws.Range("B" & val(k) & ":C" & val(k))
-                Else
-                    Set rngYellow = Union(rngYellow, ws.Range("B" & val(k) & ":C" & val(k)))
-                End If
+                ' --- APPLY PAINT DIRECTLY ---
+                ws.Range("B" & val(k) & ":C" & val(k)).Interior.Color = RGB(255, 255, 0)
             Next k
             
-            ' --- NEW BATCH PAINTING: Add the "Requires Human" cells to the Union Range ---
+            ' --- APPLY PAINT DIRECTLY ---
             For Each k In requiresHuman.keys
-                If rngYellow Is Nothing Then
-                    Set rngYellow = ws.Range("B" & val(k) & ":C" & val(k))
-                Else
-                    Set rngYellow = Union(rngYellow, ws.Range("B" & val(k) & ":C" & val(k)))
-                End If
+                ws.Range("B" & val(k) & ":C" & val(k)).Interior.Color = RGB(255, 255, 0)
             Next k
-            
-            ' --- BATCH PAINTING: Paint all yellow cells simultaneously ---
-            If Not rngYellow Is Nothing Then
-                rngYellow.Interior.Color = RGB(255, 255, 0)
-            End If
             
         End If
     End If

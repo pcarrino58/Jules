@@ -94,17 +94,11 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     ' INPUT LOGIC (Column A) - STRIPPED DOWN FOR DELETIONS ONLY
     ' ============================================================
     If Not hitMatchA Is Nothing Then
-        Dim rngBlank As Range, c As Range
+        Dim c As Range
         
         For Each c In hitMatchA.Cells
             If Len(Trim$(CStr(c.Value2))) = 0 Then
-                If rngBlank Is Nothing Then Set rngBlank = c Else Set rngBlank = Union(rngBlank, c)
-            End If
-        Next c
-
-        If Not rngBlank Is Nothing Then
-            For Each r In rngBlank.Cells
-                rowNum = r.Row
+                rowNum = c.Row
                 Me.Cells(rowNum, "B").ClearContents
                 Me.Cells(rowNum, "C").ClearContents
                 Me.Range("B" & rowNum & ":C" & rowNum).Interior.Color = RGB(252, 186, 186)
@@ -113,9 +107,9 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                 Me.Cells(rowNum, "B").Validation.Delete
                 ThisWorkbook.names("PickRow_" & rowNum).Delete
                 On Error GoTo ErrorHandler
-            Next r
-        End If
-        
+            End If
+        Next c
+
         EnsureNoGoodMatchHighlight
     End If
 
