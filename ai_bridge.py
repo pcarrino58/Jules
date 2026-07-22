@@ -172,8 +172,8 @@ def load_knowledge_base():
     for messy_term in sorted_messy_terms:
         clean_term = industry_translations[messy_term]
         if clean_term:
-            pattern = re.compile(r'\b' + re.escape(messy_term) + r'(?:s|es)?\b')
-            compiled_industry_translations.append((pattern, clean_term))
+            rule_tokens = get_stemmed_words(messy_term)
+            compiled_industry_translations.append((rule_tokens, clean_term))
 
     compiled_broad_categories = [re.compile(r'\b' + re.escape(cat) + r'\b') for cat in broad_categories]
 
@@ -396,8 +396,8 @@ def batch_lookup():
                     final_id = "REQUIRES HUMAN"
             else:
                 domain_match_found = False
-                for pattern, clean_term in compiled_industry_translations:
-                    if pattern.search(signature):
+                for rule_tokens, clean_term in compiled_industry_translations:
+                    if rule_tokens.issubset(base_words):
                         validated = validate_and_format(clean_term.strip())
                         if validated != "No good match":
                             final_match = validated
@@ -582,8 +582,8 @@ def batch_file():
                         final_id = "REQUIRES HUMAN"
                 else:
                     domain_match_found = False
-                    for pattern, clean_term in compiled_industry_translations:
-                        if pattern.search(signature):
+                    for rule_tokens, clean_term in compiled_industry_translations:
+                        if rule_tokens.issubset(base_words):
                             validated = validate_and_format(clean_term.strip())
                             if validated != "No good match":
                                 final_match = validated
