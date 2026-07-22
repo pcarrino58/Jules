@@ -310,8 +310,8 @@ def batch_lookup():
             results.append({"row": row_id, "match": "No good match", "id": "REQUIRES HUMAN"})
 
     if ai_queue_phrases:
-        all_candidates = []
-        item_candidate_counts = []
+        unique_candidates = set()
+        item_candidates_list = []
 
         for signature in ai_queue_phrases:
             candidates_set = {signature}
@@ -322,21 +322,23 @@ def batch_lookup():
                         candidates_set.add(' '.join(words[j:j+n]))
 
             candidates = list(candidates_set)
-            all_candidates.extend(candidates)
-            item_candidate_counts.append(len(candidates))
+            unique_candidates.update(candidates)
+            item_candidates_list.append(candidates)
 
-        all_candidate_vectors = embedder.encode(all_candidates, batch_size=256)
-        all_candidate_norms = all_candidate_vectors / (np.linalg.norm(all_candidate_vectors, axis=1, keepdims=True) + 1e-9)
+        unique_candidates_list = list(unique_candidates)
+        cand_to_idx = {cand: i for i, cand in enumerate(unique_candidates_list)}
 
-        offset = 0
+        unique_vectors = embedder.encode(unique_candidates_list, batch_size=256)
+        unique_norms = unique_vectors / (np.linalg.norm(unique_vectors, axis=1, keepdims=True) + 1e-9)
+
         top_k = min(20, len(lookup_phrases))
 
         for i_queue, signature in enumerate(ai_queue_phrases):
             row_id = ai_queue_rows[i_queue]
-            num_candidates = item_candidate_counts[i_queue]
 
-            candidate_norms = all_candidate_norms[offset:offset+num_candidates]
-            offset += num_candidates
+            candidates = item_candidates_list[i_queue]
+            indices = [cand_to_idx[c] for c in candidates]
+            candidate_norms = unique_norms[indices]
 
             # --- UPGRADED: Apply stemming to input words ---
             base_words = get_stemmed_words(signature)
@@ -462,8 +464,8 @@ def batch_file():
             results.append({"Row": row_id, "Match": "No good match", "Id": "REQUIRES HUMAN"})
 
     if ai_queue_phrases:
-        all_candidates = []
-        item_candidate_counts = []
+        unique_candidates = set()
+        item_candidates_list = []
 
         for signature in ai_queue_phrases:
             candidates_set = {signature}
@@ -474,22 +476,24 @@ def batch_file():
                         candidates_set.add(' '.join(words[j:j+n]))
 
             candidates = list(candidates_set)
-            all_candidates.extend(candidates)
-            item_candidate_counts.append(len(candidates))
+            unique_candidates.update(candidates)
+            item_candidates_list.append(candidates)
 
-        all_candidate_vectors = embedder.encode(all_candidates, batch_size=256)
-        all_candidate_norms = all_candidate_vectors / (np.linalg.norm(all_candidate_vectors, axis=1, keepdims=True) + 1e-9)
+        unique_candidates_list = list(unique_candidates)
+        cand_to_idx = {cand: i for i, cand in enumerate(unique_candidates_list)}
 
-        offset = 0
+        unique_vectors = embedder.encode(unique_candidates_list, batch_size=256)
+        unique_norms = unique_vectors / (np.linalg.norm(unique_vectors, axis=1, keepdims=True) + 1e-9)
+
         top_k = min(20, len(lookup_phrases))
 
         for i_queue, signature in enumerate(ai_queue_phrases):
             row_id = ai_queue_rows[i_queue]
             original_base = ai_original_bases[i_queue]
-            num_candidates = item_candidate_counts[i_queue]
 
-            candidate_norms = all_candidate_norms[offset:offset+num_candidates]
-            offset += num_candidates
+            candidates = item_candidates_list[i_queue]
+            indices = [cand_to_idx[c] for c in candidates]
+            candidate_norms = unique_norms[indices]
 
             # --- UPGRADED: Apply stemming to input words ---
             base_words = get_stemmed_words(signature)
