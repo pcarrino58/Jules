@@ -337,6 +337,7 @@ def batch_lookup():
             row_id = ai_queue_rows[i_queue]
 
             candidates = item_candidates_list[i_queue]
+            num_candidates = len(candidates)
             indices = [cand_to_idx[c] for c in candidates]
             candidate_norms = unique_norms[indices]
 
@@ -492,6 +493,7 @@ def batch_file():
             original_base = ai_original_bases[i_queue]
 
             candidates = item_candidates_list[i_queue]
+            num_candidates = len(candidates)
             indices = [cand_to_idx[c] for c in candidates]
             candidate_norms = unique_norms[indices]
 
