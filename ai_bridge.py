@@ -359,8 +359,8 @@ def batch_lookup():
                         lookup_words = lookup_words_sets[idx]
                         intersection = len(base_words.intersection(lookup_words))
 
-                        if len(lookup_words) > 0:
-                            overlap = intersection / len(lookup_words)
+                        if len(base_words) + len(lookup_words) > 0:
+                            overlap = (2.0 * intersection) / (len(base_words) + len(lookup_words))
                         else:
                             overlap = 0.0
 
@@ -514,8 +514,8 @@ def batch_file():
                         lookup_words = lookup_words_sets[idx]
                         intersection = len(base_words.intersection(lookup_words))
 
-                        if len(lookup_words) > 0:
-                            overlap = intersection / len(lookup_words)
+                        if len(base_words) + len(lookup_words) > 0:
+                            overlap = (2.0 * intersection) / (len(base_words) + len(lookup_words))
                         else:
                             overlap = 0.0
 
