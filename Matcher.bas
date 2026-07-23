@@ -2753,6 +2753,7 @@ Private Function GetBigramSimilarity(ByVal inputToks As Variant, ByVal targetTok
         GetBigramSimilarity = (2 * matchCount) / totalGrams
     End If
 End Function
+
 Public Sub PropagateLearnedChoice(ByVal ws As Worksheet, ByVal sourceRow As Long, ByVal targetSig As String, ByVal targetNorm As String, ByVal chosenOut As String)
     Dim lastRow As Long, r As Long
     Dim raw As String, norm As String, rowSig As String
@@ -2788,7 +2789,10 @@ Public Sub PropagateLearnedChoice(ByVal ws As Worksheet, ByVal sourceRow As Long
                 norm = NormalizeAndAlias(raw, mAliasDict)
                 rowSig = BuildLearnSignature(norm)
 
-                If (Len(targetSig) > 0 And rowSig = targetSig) Or (norm = targetNorm) Then
+                ' 1. Check exact signature match (AI's smart grouping)
+                ' 2. Check exact text match
+                ' 3. NEW: Check if they are identical except for a trailing designation (A, B, 1, 2)
+                If (Len(targetSig) > 0 And rowSig = targetSig) Or (norm = targetNorm) Or IsSameEquipmentFamily(norm, targetNorm) Then
                     arrData(r, 2) = chosenOut
                     arrData(r, 3) = "Auto-Propagated"
                     rowsToUpdate(r) = True
@@ -2799,16 +2803,18 @@ Public Sub PropagateLearnedChoice(ByVal ws As Worksheet, ByVal sourceRow As Long
 
     ws.Range("A1:C" & lastRow).Value2 = arrData
 
-    If rowsToUpdate.count > 0 Then
+If rowsToUpdate.count > 0 Then
         Dim k As Variant
         For Each k In rowsToUpdate.keys
+            ' Strip the yellow highlight and return it to the default pink
+            ws.Range("B" & CLng(k) & ":C" & CLng(k)).Interior.Color = RGB(252, 186, 186)
+            
             On Error Resume Next
             Err.Clear
             ws.Cells(CLng(k), 2).Validation.Delete
             On Error GoTo 0
         Next k
     End If
-
 SafeExit:
     ' Restore the state to exactly what it was before this function ran
     Application.ScreenUpdating = prevScreen
@@ -2816,6 +2822,30 @@ SafeExit:
 
     If Err.Number <> 0 Then MsgBox "Error propagating choice: " & Err.Description
 End Sub
+' --- NEW HELPER FUNCTION TO CATCH "PACKAGE A" vs "PACKAGE B" ---
+Private Function IsSameEquipmentFamily(ByVal str1 As String, ByVal str2 As String) As Boolean
+    Dim arr1() As String, arr2() As String
+    Dim i As Long
+    
+    arr1 = Split(str1, " ")
+    arr2 = Split(str2, " ")
+    
+    ' If they don't have the same number of words, they aren't the exact same family
+    If UBound(arr1) <> UBound(arr2) Then Exit Function
+    
+    ' If it's only a 1-word string, fallback to exact match only
+    If UBound(arr1) = 0 Then Exit Function
+    
+    ' Check if all words match EXACTLY, except for the very last word
+    For i = 0 To UBound(arr1) - 1
+        If arr1(i) <> arr2(i) Then Exit Function
+    Next i
+    
+    ' Check if the last word is just a 1 to 3 character designation (A, B, 1, 12, C1)
+    If Len(arr1(UBound(arr1))) <= 3 And Len(arr2(UBound(arr2))) <= 3 Then
+        IsSameEquipmentFamily = True
+    End If
+End Function
 
 ' ==========================================================
 ' NEW HELPER: Safely escape strings for JSON payloads
@@ -3347,16 +3377,35 @@ Public Function BuildSearchDropdown(wsInput As Worksheet, rowNum As Long, search
     Dim i As Long
     Dim sClean As String: sClean = LCase$(Trim$(searchStr))
 
-    ' Scan the lookup cache for the partial word
-    For i = 1 To mLookupCount
-        If Len(mLookupPhrases(i)) > 0 Then
-            If InStr(1, LCase$(mLookupPhrases(i)), sClean) > 0 Then
-                results(count) = mLookupPhrases(i)
-                count = count + 1
-                If count >= 50 Then Exit For ' Cap at 50 to prevent lag
+' Split the search string into individual words for omni-directional matching
+        Dim searchWords() As String
+        searchWords = Split(sClean, " ")
+        Dim w As Variant
+        Dim allFound As Boolean
+
+        ' Scan the lookup cache for the partial words
+        For i = 1 To mLookupCount
+            If Len(mLookupPhrases(i)) > 0 Then
+                allFound = True
+                
+                ' Check if EVERY typed word exists somewhere in the lookup phrase (order independent)
+                For Each w In searchWords
+                    If Len(Trim$(CStr(w))) > 0 Then
+                        If InStr(1, LCase$(mLookupPhrases(i)), Trim$(CStr(w))) = 0 Then
+                            allFound = False
+                            Exit For
+                        End If
+                    End If
+                Next w
+                
+                ' If all words are present, add to dropdown
+                If allFound Then
+                    results(count) = mLookupPhrases(i)
+                    count = count + 1
+                    If count >= 50 Then Exit For ' Cap at 50 to prevent lag
+                End If
             End If
-        End If
-    Next i
+        Next i
 
     If count > 0 Then
         ReDim Preserve results(0 To count - 1)
