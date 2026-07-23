@@ -122,7 +122,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     If Not hitMatchB Is Nothing Then
         If Target.CountLarge = 1 Then
             Dim rowKey As Long: rowKey = Target.Row
-            Dim valToLearn As String: valToLearn = Trim$(CStr(Target.Value2))
+            Dim valToLearn As String: valToLearn = Matcher.CleanPastedOutput(Trim$(CStr(Target.Value2)))
             
             If Len(valToLearn) > 0 And valToLearn <> "Reject AI Guess" Then
                 
@@ -214,61 +214,8 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                 ' 3. Update Column C's Status
                 Me.Cells(rowKey, "C").Value2 = "USER_LEARNED"
                 
-                ' 4. Ping Python to memorize this rule permanently
-                Dim rawInput As String: rawInput = Trim$(CStr(Me.Cells(rowKey, "A").Value2))
-                If Len(rawInput) > 0 Then
-                    Dim httpLearn As Object
-                    Set httpLearn = CreateObject("MSXML2.XMLHTTP")
-                    Dim jsonLearn As String
-                    jsonLearn = "{""phrase"": """ & Replace(Replace(rawInput, "\", "\\"), """", "\""") & """, ""match"": """ & Replace(Replace(valToLearn, "\", "\\"), """", "\""") & """}"
-                    
-                    On Error Resume Next
-                    httpLearn.Open "POST", "http://127.0.0.1:5000/learn", False
-                    httpLearn.setRequestHeader "Content-Type", "application/json"
-                    httpLearn.send jsonLearn
-                    On Error GoTo ErrorHandler
-                    
-                    ' 5. AUTO-PROPAGATE
-                    Dim propR As Long
-                    Dim propLast As Long
-                    propLast = Me.Cells(Me.Rows.count, 1).End(xlUp).Row
-
-                    If propLast >= 2 Then
-                        Dim arrData As Variant
-                        arrData = Me.Range("A1:C" & propLast).Value2
-
-                        Dim rowsToUpdate As Object
-                        Set rowsToUpdate = CreateObject("Scripting.Dictionary")
-                        
-                        Dim cleanTarget As String
-                        cleanTarget = LCase(Trim(rawInput))
-
-                        For propR = 2 To propLast
-                            If propR <> rowKey Then
-                                Dim candidateInput As String
-                                candidateInput = LCase(Trim(CStr(arrData(propR, 1))))
-                                
-                                If Len(candidateInput) > 0 And candidateInput = cleanTarget Then
-                                    arrData(propR, 2) = valToLearn
-                                    arrData(propR, 3) = "USER_LEARNED"
-                                    rowsToUpdate(propR) = True
-                                End If
-                            End If
-                        Next propR
-
-                        Me.Range("A1:C" & propLast).Value2 = arrData
-
-                        If rowsToUpdate.count > 0 Then
-                            Dim k As Variant
-                            For Each k In rowsToUpdate.keys
-                                Me.Range("B" & CLng(k) & ":C" & CLng(k)).Interior.Color = RGB(252, 186, 186)
-                                On Error Resume Next
-                                Me.Cells(CLng(k), 2).Validation.Delete
-                                On Error GoTo ErrorHandler
-                            Next k
-                        End If
-                    End If
-                End If
+' 4. Delegate Learning, Python API, and Auto-Propagation to the Master Engine
+                Call Matcher.RecordLearnedOverride(rowKey)
                 
             End If
         End If
