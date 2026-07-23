@@ -151,7 +151,7 @@ def load_knowledge_base():
     if os.path.exists(rules_file):
         try:
             print(f"Reading Rules from {rules_file}...")
-            with open(rules_file, "r", encoding="utf-8") as f:
+            with open(rules_file, "r", encoding="utf-8-sig") as f:
                 for line in f:
                     parts = line.split('\t')
                     if len(parts) >= 3:
@@ -211,7 +211,7 @@ def load_knowledge_base():
 
     if os.path.exists(custom_rules_file):
         try:
-            with open(custom_rules_file, "r", encoding="utf-8") as f:
+            with open(custom_rules_file, "r", encoding="utf-8-sig") as f:
                 with custom_rules_lock:
                     custom_rules.clear()
                     for line in f:
@@ -267,7 +267,7 @@ def learn_rule():
             # Read existing
             diskMap = {}
             if os.path.exists(custom_rules_file):
-                with open(custom_rules_file, "r", encoding="utf-8") as f:
+                with open(custom_rules_file, "r", encoding="utf-8-sig") as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -284,7 +284,7 @@ def learn_rule():
             diskMap[signature] = f"{signature}|{corrected_match}|{signature}|{now_str}"
 
             temp_file = custom_rules_file + ".tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
+            with open(temp_file, "w", encoding="utf-8-sig") as f:
                 for k, v in diskMap.items():
                     f.write(f"{v}\n")
             os.replace(temp_file, custom_rules_file)

@@ -2370,6 +2370,22 @@ Private Sub MigrateLocalLearningsToExternal()
     
     streamOut.SaveToFile p, 2
     streamOut.Close
+
+    ' Trigger Python AI Reload
+    Dim http As Object
+    On Error Resume Next
+    Err.Clear
+    Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    If http Is Nothing Then
+        Set http = CreateObject("MSXML2.XMLHTTP")
+    End If
+    If Not http Is Nothing Then
+        http.setTimeouts 1000, 1000, 1000, 1000
+        http.Open "POST", AI_API_BASE_URL & "/reload", False
+        http.setRequestHeader "Content-Type", "application/json"
+        http.send "{}"
+    End If
+    On Error GoTo 0
 End Sub
 Private Sub ImportExternalData()
     Dim p As String, fNum As Integer
@@ -2455,6 +2471,22 @@ Public Sub SyncRulesWithExternal(ByVal wb As Workbook, ByVal sheetName As String
 
     streamOut.SaveToFile p, 2 ' 2 = SaveCreateOverWrite
     streamOut.Close
+
+    ' Trigger Python AI Reload
+    Dim http As Object
+    On Error Resume Next
+    Err.Clear
+    Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    If http Is Nothing Then
+        Set http = CreateObject("MSXML2.XMLHTTP")
+    End If
+    If Not http Is Nothing Then
+        http.setTimeouts 1000, 1000, 1000, 1000
+        http.Open "POST", AI_API_BASE_URL & "/reload", False
+        http.setRequestHeader "Content-Type", "application/json"
+        http.send "{}"
+    End If
+    On Error GoTo 0
 End Sub
 Private Sub LoadRulesFromSheet(ByVal wb As Workbook, ByVal sheetName As String, _
     ByVal aliasDict As Object, ByVal phraseMap As Object, _
@@ -2899,7 +2931,10 @@ Public Sub RunAISniper(ws As Worksheet, rowNum As Long, inputPhrase As String)
 
     ' Using basic string split to avoid mid-string quote issues
     Dim parts() As String
-    parts = Split(responseText, """match"":")
+    parts = Split(responseText, """match"":" & Chr(34))
+    If UBound(parts) = 0 Then
+        parts = Split(responseText, """match"": " & Chr(34)) ' Flask space handling
+    End If
     If UBound(parts) > 0 Then
         matchStr = Trim(parts(1))
         If Left(matchStr, 1) = """" Then matchStr = Mid(matchStr, 2)
@@ -2921,6 +2956,9 @@ Public Sub RunAISniper(ws As Worksheet, rowNum As Long, inputPhrase As String)
     End If
 
     parts = Split(responseText, """id"":")
+    If UBound(parts) = 0 Then
+        parts = Split(responseText, """id"": ")
+    End If
     If UBound(parts) > 0 Then
         confStr = Trim(parts(1))
         If Left(confStr, 1) = """" Then confStr = Mid(confStr, 2)
@@ -3178,14 +3216,33 @@ Public Function GetAIMatch(ByVal messyPhrase As String) As String
 
     If http.Status = 200 Then
         responseText = http.responseText
-        matchStart = InStr(responseText, """match"":")
-        If matchStart > 0 Then
-            matchStart = matchStart + 9 ' Skip past "match": "
-            matchEnd = InStr(matchStart, responseText, """")
-            If matchEnd > 0 Then
-                GetAIMatch = Mid(responseText, matchStart, matchEnd - matchStart)
-                Exit Function
-            End If
+
+        Dim parts() As String
+        parts = Split(responseText, """match"":" & Chr(34))
+        If UBound(parts) = 0 Then
+            parts = Split(responseText, """match"": " & Chr(34)) ' Handle Flask jsonify space
+        End If
+
+        If UBound(parts) > 0 Then
+            Dim matchStr As String
+            matchStr = parts(1)
+
+            Dim i As Long
+            For i = 1 To Len(matchStr)
+                If Mid(matchStr, i, 1) = """" Then
+                    If i = 1 Or Mid(matchStr, i - 1, 1) <> "\" Then
+                        matchStr = Left(matchStr, i - 1)
+                        Exit For
+                    End If
+                End If
+            Next i
+
+            matchStr = Replace(matchStr, "\n", vbLf)
+            matchStr = Replace(matchStr, "\\", "\")
+            matchStr = Replace(matchStr, "\" & """", """")
+
+            GetAIMatch = matchStr
+            Exit Function
         End If
     End If
 
