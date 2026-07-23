@@ -22,7 +22,11 @@ print(f"Engine forcing hardware acceleration on: [{device.upper()}]")
 embedder = SentenceTransformer('all-MiniLM-L6-v2', device=device)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-custom_rules_file = os.path.join(script_dir, "custom_rules.json")
+appdata = os.environ.get('APPDATA', '')
+if not appdata:
+    appdata = os.path.expanduser('~') # fallback
+
+custom_rules_file = os.path.join(appdata, "Uniformat_Learned.txt")
 
 custom_rules = {}
 custom_rules_lock = threading.Lock()
@@ -47,15 +51,20 @@ RE_TRAILING_NOISE = re.compile(r'\s+\b([0-9]+[a-z]*|[a-z])\b$')
 
 # --- THE NEW GRAMMAR ENGINE (STEMMER) ---
 def get_stemmed_words(text):
-    """Removes plural 's' so 'tanks' mathematically intersects with 'tank'"""
+    '''Removes plural 's' and common suffixes to align with VBA NormalizeAndAlias'''
     words = text.split()
     stemmed = set()
     for w in words:
-        # Don't strip 's' off words like 'glass', 'bypass', 'gas'
-        if len(w) > 3 and w.endswith('s') and not w.endswith('ss'):
-            stemmed.add(w[:-1])
-        else:
-            stemmed.add(w)
+        if len(w) > 4:
+            if w.endswith('ing'):
+                w = w[:-3]
+            elif w.endswith('ed'):
+                w = w[:-2]
+            elif w.endswith('es'):
+                w = w[:-2]
+            elif w.endswith('s') and not w.endswith('ss'):
+                w = w[:-1]
+        stemmed.add(w)
     return stemmed
 
 def get_generalized_signature(text):
@@ -92,7 +101,18 @@ def load_knowledge_base():
 
     print("--- Initializing Engine ---")
 
+    appdata = os.environ.get('APPDATA', '')
+    if not appdata:
+        appdata = os.path.expanduser('~')
+
+    rules_file = os.path.join(appdata, "Uniformat_Rules.txt")
+
+    lookup_phrases, lookup_phrases_original, canonical_casing = [], [], {}
+    industry_translations, broad_categories = {}, []
+
+    # RESTORE THE EXCEL TEMPLATE PARSING FOR LOOKUPS
     template_folder = os.environ.get("TEMPLATE_FOLDER", r"C:\Users\pcarr\OneDrive\Documents\Custom Office Templates")
+    import glob
     search_pattern = os.path.join(template_folder, "*.xltm")
     list_of_files = glob.glob(search_pattern)
 
@@ -102,9 +122,6 @@ def load_knowledge_base():
     else:
         excel_file = ""
         print(f"WARNING: No .xltm files found in {template_folder}")
-
-    lookup_phrases, lookup_phrases_original, canonical_casing = [], [], {}
-    industry_translations, broad_categories = {}, []
 
     if os.path.exists(excel_file):
         try:
@@ -127,28 +144,34 @@ def load_knowledge_base():
                 print(f"Successfully locked onto {len(lookup_phrases)} phrases!")
             else:
                 print("WARNING: Could not find 'Asset Sub Type' column.")
+        except Exception as e:
+            print(f"ERROR reading Excel file for lookups: {e}")
 
-            print(f"Reading Rules Sheet from {excel_file}...")
-            df_rules = pd.read_excel(excel_file, sheet_name="Rules Sheet", header=None)
-            for index, row in df_rules.iterrows():
-                if pd.isna(row[0]) or pd.isna(row[1]): continue
-                rule_type = str(row[0]).strip().lower()
-                from_text = str(row[1]).strip().lower()
-                to_text = str(row[2]).strip().replace('|', '\n') if not pd.isna(row[2]) else ""
+    # Note: VBA sends rules as: Type \t From \t To \t Weight
+    if os.path.exists(rules_file):
+        try:
+            print(f"Reading Rules from {rules_file}...")
+            with open(rules_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.split('\t')
+                    if len(parts) >= 3:
+                        rule_type = parts[0].strip().lower()
+                        from_text = parts[1].strip().lower()
+                        to_text = parts[2].strip().replace('|', '\n')
 
-                if to_text:
-                    corrected_options = []
-                    for opt in to_text.split('\n'):
-                        corrected_options.append(canonical_casing.get(opt.strip().lower(), opt.strip()))
-                    to_text = '\n'.join(corrected_options)
+                        if to_text:
+                            corrected_options = []
+                            for opt in to_text.split('\n'):
+                                corrected_options.append(canonical_casing.get(opt.strip().lower(), opt.strip()))
+                            to_text = '\n'.join(corrected_options)
 
-                if rule_type in ["alias", "phrase", "list"]:
-                    industry_translations[from_text] = to_text
-                elif rule_type == "core":
-                    broad_categories.append(from_text)
+                        if rule_type in ["alias", "phrase", "list"]:
+                            industry_translations[from_text] = to_text
+                        elif rule_type == "core":
+                            broad_categories.append(from_text)
             print(f"Loaded {len(industry_translations)} translations and {len(broad_categories)} core categories!")
         except Exception as e:
-            print(f"ERROR reading Excel file: {e}")
+            print(f"ERROR reading rules file: {e}")
     
     if not lookup_phrases:
         fallback_phrases = ["Air Handler", "Door Manual Swing", "Fan Coil Unit"]
@@ -188,18 +211,20 @@ def load_knowledge_base():
 
     if os.path.exists(custom_rules_file):
         try:
-            with open(custom_rules_file, "r") as f:
+            with open(custom_rules_file, "r", encoding="utf-8") as f:
                 with custom_rules_lock:
                     custom_rules.clear()
-                    raw_rules = json.load(f)
-                    for k, v in raw_rules.items():
-                        corrected_v = []
-                        for opt in str(v).split('\n'):
-                            corrected_v.append(canonical_casing.get(opt.strip().lower(), opt.strip()))
-                        custom_rules[k] = '\n'.join(corrected_v)
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            parts = line.split("|")
+                            if len(parts) >= 2:
+                                signature = parts[0].strip()
+                                match = parts[1].strip()
+                                custom_rules[signature] = match
             print(f"Loaded {len(custom_rules)} custom learned rules from memory!")
         except Exception as e:
-            print(f"Failed to read custom_rules.json: {e}")
+            print(f"Failed to read Uniformat_Learned.txt: {e}")
 
     print("Knowledge Base Engine Ready!")
 
@@ -238,9 +263,30 @@ def learn_rule():
     if signature and corrected_match:
         with custom_rules_lock:
             custom_rules[signature] = corrected_match
+
+            # Read existing
+            diskMap = {}
+            if os.path.exists(custom_rules_file):
+                with open(custom_rules_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            parts = line.split("|")
+                            if len(parts) >= 2:
+                                diskMap[parts[0]] = line
+
+            from datetime import datetime
+            now_str = datetime.now().strftime("%m/%d/%Y %I:%M:%S %p")
+            # VBA formats it as: normIn | outP | sig | times | date
+            # BUT VBA also migrates it as: normIn|outP|sig|Now
+            # AND the read block uses signature as parts[0] and match as parts[1]
+            # If VBA writes normIn as parts[0], then python needs to write signature as parts[0]
+            diskMap[signature] = f"{signature}|{corrected_match}|{signature}|{now_str}"
+
             temp_file = custom_rules_file + ".tmp"
-            with open(temp_file, "w") as f:
-                json.dump(custom_rules, f, indent=4)
+            with open(temp_file, "w", encoding="utf-8") as f:
+                for k, v in diskMap.items():
+                    f.write(f"{v}\n")
             os.replace(temp_file, custom_rules_file)
 
         print(f"🧠 AI LEARNED GENERAL RULE: [{signature}] -> [{corrected_match}]")

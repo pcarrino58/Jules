@@ -1823,45 +1823,20 @@ End Function
 ' MASTER MATCHER MODULE - PART 3 of 3
 ' ==========================================================
 
-Public Function BuildLearnSignature(ByVal normalizedInput As String) As String
-    Dim words() As String, keep() As String
-    Dim i As Long, n As Long, tok As String
-    Dim wsL As Worksheet
+Public Function BuildLearnSignature(ByVal text As String) As String
+    ' Replaced with the generalized signature logic to perfectly match Python
+    Dim regEx As Object
+    Set regEx = CreateObject("VBScript.RegExp")
+    regEx.Global = True
+    regEx.IgnoreCase = True
 
-    If mLookupVocab Is Nothing Then
-        Set wsL = GetLookupSheet()
-        If Not wsL Is Nothing Then
-            If mAliasDict Is Nothing Then EnsureDictionaries
-            BuildLookupCache wsL
-        End If
-    End If
+    text = Trim(text)
 
-    words = Tokenize(normalizedInput)
-    If IsEmptyArray(words) Then BuildLearnSignature = "": Exit Function
+    ' Aggressively strip spaces, #, and trailing alphanumeric codes (e.g., " #1", "2B")
+    regEx.pattern = "\s*#?\s*\d+[a-zA-Z]*$"
+    text = Trim(regEx.Replace(text, ""))
 
-    ReDim keep(0 To UBound(words))
-    n = 0
-    For i = LBound(words) To UBound(words)
-        tok = LCase$(Trim$(words(i)))
-        If tok = "" Then GoTo NextTok
-        If Not IsMeaningfulToken(tok, mStopWords) Then GoTo NextTok
-        If IsDescriptorToken(tok) Then GoTo NextTok
-        ' If Not IsAllAlphaNum(tok) Then GoTo NextTok ' Relaxed to allow hyphenated tags
-        If IsTagLike(tok) Then GoTo NextTok
-
-        ' Allow token if it is in vocab OR if it is numeric (to distinguish Pump 1 from Pump 2)
-        If Not IsAllowedLearnToken(tok) Then
-            If Not IsNumeric(tok) Then GoTo NextTok
-        End If
-
-        keep(n) = tok
-        n = n + 1
-NextTok:
-    Next i
-    If n = 0 Then BuildLearnSignature = "": Exit Function
-    ReDim Preserve keep(0 To n - 1)
-    Call QuickSortStringsAsc(keep, 0, UBound(keep))
-    BuildLearnSignature = Join(keep, "|")
+    BuildLearnSignature = LCase(text)
 End Function
 
 Private Sub EnsureDictionaries()
@@ -2917,22 +2892,51 @@ Public Sub RunAISniper(ws As Worksheet, rowNum As Long, inputPhrase As String)
     Dim responseText As String
     responseText = http.responseText
 
-    ' Extract the Match and the Confidence Reason
+    ' Extract the Match and the Confidence Reason Safely
     Dim matchStr As String, confStr As String
     Dim matchStart As Long, matchEnd As Long
     Dim confStart As Long, confEnd As Long
 
-    matchStart = InStr(responseText, """match"":""") + 9
-    If matchStart > 9 Then
-        matchEnd = InStr(matchStart, responseText, """")
-        matchStr = Mid(responseText, matchStart, matchEnd - matchStart)
+    ' Using basic string split to avoid mid-string quote issues
+    Dim parts() As String
+    parts = Split(responseText, """match"":")
+    If UBound(parts) > 0 Then
+        matchStr = Trim(parts(1))
+        If Left(matchStr, 1) = """" Then matchStr = Mid(matchStr, 2)
+        ' Find the next non-escaped quote
+        Dim i As Long
+        For i = 1 To Len(matchStr)
+            If Mid(matchStr, i, 1) = """" Then
+                If i = 1 Or Mid(matchStr, i - 1, 1) <> "\" Then
+                    matchStr = Left(matchStr, i - 1)
+                    Exit For
+                End If
+            End If
+        Next i
+
+        ' Unescape newlines
+        matchStr = Replace(matchStr, "\n", vbLf)
+        matchStr = Replace(matchStr, "\\", "\")
+        matchStr = Replace(matchStr, "\" & """", """")
     End If
 
-    confStart = InStr(responseText, """id"":""") + 6
-    If confStart > 6 Then
-        confEnd = InStr(confStart, responseText, """")
-        confStr = Mid(responseText, confStart, confEnd - confStart)
+    parts = Split(responseText, """id"":")
+    If UBound(parts) > 0 Then
+        confStr = Trim(parts(1))
+        If Left(confStr, 1) = """" Then confStr = Mid(confStr, 2)
+        For i = 1 To Len(confStr)
+            If Mid(confStr, i, 1) = """" Then
+                If i = 1 Or Mid(confStr, i - 1, 1) <> "\" Then
+                    confStr = Left(confStr, i - 1)
+                    Exit For
+                End If
+            End If
+        Next i
     End If
+
+' DECISION ENGINE
+
+' DECISION ENGINE
 
 ' DECISION ENGINE
     If matchStr <> "" And matchStr <> "UNKNOWN" And matchStr <> "No good match" Then
