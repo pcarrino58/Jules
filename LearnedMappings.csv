@@ -1,0 +1,65 @@
+NormalizedInput,OutputPhrase,Signature,TimesUsed,LastUpdated
+hotel dcw booster package amps,Domestic booster pump,amps|booster|package,1,46226.39972
+north tower dcw booster package amps,Domestic booster pump,amps|booster|package|tower,1,46226.40495
+north tower dcw booster package b,Domestic booster pump,booster|package|tower,1,46226.43199
+north tower dcw booster package c,Domestic booster pump,booster|package|tower,1,46226.43505
+valve fire main inlet backflow preventer,Backflow Prevention Device,backflow|fire|valve,1,46226.43534
+fire alarm panel,Maintenance and Inspection Fire Alarm Control Panel,alarm|fire|panel,1,46226.45146
+p garage n w supply air intake,Axial Fan 5000 to 10000 CFM,air|supply,1,46226.45201
+stair j below grade pressurization,Centrifugal Fan,,1,46226.45262
+stair k below grade pressurization,Centrifugal Fan,,1,46226.45299
+by pass filter for glycol pump p amps p b,Hydronic Bypass Filter,amps|filter|glycol|pump,1,46226.45344
+compressor fe supervisory valv,Reciprocating Air Compressor,compressor,1,46226.45368
+eyewash station p mech room,Emergency Eye Wash Shower Station,station,1,46226.45581
+valve glycol heat loop,Automatic Valve,glycol|heat|loop|valve,1,46226.45655
+variable frequency drive p amps,Variable Frequency Drive VFD,amps|drive|frequency|variable,1,46226.45689
+variable frequency drive p b,Variable Frequency Drive VFD,drive|frequency|variable,1,46226.4572
+eyewash station ramp heat room,Emergency Eye Wash Shower Station,heat|station,1,46226.46078
+glycol dilution sys,Glycol System,glycol,1,46226.46103
+by pass filter for chill water pump p amps p b p c,Hydronic Bypass Filter,amps|filter|pump|water,1,46226.46169
+by pass filter for heat water pump p amps p b,Hydronic Bypass Filter,amps|filter|heat|pump|water,1,46226.46206
+pot feeder for chill water pump p amps p b p c,Chemical Pot Feeder,amps|feeder|pot|pump|water,1,46226.46241
+elevator freight,Passenger Freight Cable Elevator,elevator|freight,1,46226.46675
+pump fuel for diesel tank cf,Fuel Oil Pump,diesel|fuel|pump|tank,1,46226.47115
+tank diesel assembly,Above Ground Fuel Oil Storage Tank,diesel|tank,1,46226.47168
+backflow preventer bridge to acc antifreeze,Backflow Prevention Device,backflow|bridge,1,46226.47207
+variable frequency drive air handling unit fan,Variable Frequency Drive VFD,air|drive|fan|frequency|unit|variable,1,46226.47277
+damper electrical room,Motorized Damper,damper|electrical,1,46226.47302
+damper mechanical room,Motorized Damper,damper,1,46226.47345
+steam trap hrv heat,Steam Trap,heat|steam|trap,1,46226.4737
+variable frequency drive hrv return fan,Variable Frequency Drive VFD,drive|fan|frequency|return|variable,1,46226.4741
+variable frequency drive hrv supply fan,Variable Frequency Drive VFD,drive|fan|frequency|supply|variable,1,46226.47447
+variable frequency drive chill water pump,Variable Frequency Drive VFD,drive|frequency|pump|variable|water,2,46226.47578
+steam trap hex amps,Steam Trap,amps|steam|trap,1,46226.47634
+steam trap hex b,Steam Trap,steam|trap,1,46226.47839
+steam trap low pressure steam supply,Steam Trap,pressure|steam|steam|supply|trap,1,46226.47889
+steam trap hrv glycol heat loop,Steam Trap,glycol|heat|loop|steam|trap,1,46226.47916
+steam trap air handler hrv steam supply,Steam Trap,air|handler|steam|steam|supply|trap,1,46226.47946
+variable frequency drive air handler fan,Variable Frequency Drive VFD,air|drive|fan|frequency|handler|variable,1,46226.48007
+tank expansion hrv glycol heat loop,Expansion Tank,expansion|glycol|heat|loop|tank,1,46226.48064
+variable frequency drive heat water circulation pump,Variable Frequency Drive VFD,drive|frequency|heat|pump|variable|water,1,46226.48095
+heater space vestibule room mech room door,Force Flow Electric Unit Heater,door|heater,1,46226.48163
+emergency light electrical room,Emergency lighting,electrical|emergency|light,2,46226.48942
+nt emergency generator set nmph,Emergency Diesel or Gas Generator,emergency|generator,1,46226.48252
+tank emergency generator fuel day,Above Ground Fuel Oil Storage Tank,emergency|fuel|generator|tank,1,46226.48296
+generator room emergency light,Emergency lighting,emergency|generator|light,1,46226.48322
+damper emergency generator room,Motorized Damper,damper|emergency|generator,1,46226.48346
+heater space emergency generator room,Force Flow Electric Unit Heater,emergency|generator|heater,1,46226.48411
+damper elevator pressurization fan room,Motorized Damper,damper|elevator|fan,1,46226.48444
+damper air plenum,Motorized Damper,air|damper,1,46226.48777
+valve temperature control glycol heat loop,Automatic Valve,control|glycol|heat|loop|temperature|valve,1,46226.48804
+valve temperature control hex amps,Automatic Valve,amps|control|temperature|valve,1,46226.48832
+valve temperature control hex b,Automatic Valve,control|temperature|valve,1,46226.48866
+th fancoil type amps,Hydronic Fan Coil Unit,th fancoil type amps,2,46226.51684
+conventional kitchen exhaust,Belt Drive Kitchen Hood with Fire Suppression,conventional kitchen exhaust,1,46226.50993
+conventional w at kitchen exhaust,Belt Drive Kitchen Hood with Fire Suppression,conventional w at kitchen exhaust,1,46226.51069
+fire alarm pull station bst level retail green corridor,Fire System Interface Devices Bells Horns Pulls Strobes,fire alarm pull station bst level retail green corridor,1,46226.51127
+uv hood kitchen exhaust,Belt Drive Kitchen Hood with Fire Suppression,uv hood kitchen exhaust,1,46226.51161
+panel volts floor,Breaker Panelboard 225A and Above,panel volts floor,1,46226.51219
+th floor fire alarm pull station,Fire System Interface Devices Bells Horns Pulls Strobes,th floor fire alarm pull station,1,46226.51338
+th floor fire damper,Fire Damper,th floor fire damper,1,46226.51365
+th floor fire hose cabinet,Fire Hose Cabinet,th floor fire hose cabinet,1,46226.514
+th floor ne backflow preventer,Backflow Prevention Device,th floor ne backflow preventer,1,46226.51468
+th floor exit light,Emergency lighting,th floor exit light,1,46226.51501
+th floor fan variable frequency drive,Variable Frequency Drive VFD,th floor fan variable frequency drive,2,46226.51625
+air conditioner computer room unit,Computer Room Direct Expansion Package AC Unit,air conditioner computer room unit,1,46226.51844
