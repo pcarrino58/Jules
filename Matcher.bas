@@ -1825,16 +1825,22 @@ End Function
 
 Public Function BuildLearnSignature(ByVal text As String) As String
     ' Replaced with the generalized signature logic to perfectly match Python
-    Dim regEx As Object
-    Set regEx = CreateObject("VBScript.RegExp")
-    regEx.Global = True
-    regEx.IgnoreCase = True
+    Static regEx As Object
+    If regEx Is Nothing Then
+        Set regEx = CreateObject("VBScript.RegExp")
+        regEx.Global = True
+        regEx.IgnoreCase = True
+        regEx.pattern = "\s*#?\s*\d+[a-zA-Z]*$"
+    End If
 
     text = Trim(text)
 
     ' Aggressively strip spaces, #, and trailing alphanumeric codes (e.g., " #1", "2B")
-    regEx.pattern = "\s*#?\s*\d+[a-zA-Z]*$"
-    text = Trim(regEx.Replace(text, ""))
+    Dim prevText As String
+    Do
+        prevText = text
+        text = Trim(regEx.Replace(text, ""))
+    Loop Until text = prevText
 
     BuildLearnSignature = LCase(text)
 End Function
@@ -2938,7 +2944,13 @@ Public Sub RunAISniper(ws As Worksheet, rowNum As Long, inputPhrase As String)
 
     ' Using basic string split to avoid mid-string quote issues
     Dim parts() As String
-    parts = Split(responseText, """match"":")
+
+    If InStr(1, responseText, """match"": ") > 0 Then
+        parts = Split(responseText, """match"": ")
+    Else
+        parts = Split(responseText, """match"":")
+    End If
+
     If UBound(parts) > 0 Then
         matchStr = Trim(parts(1))
         If Left(matchStr, 1) = """" Then matchStr = Mid(matchStr, 2)
@@ -3229,14 +3241,38 @@ Public Function GetAIMatch(ByVal messyPhrase As String) As String
 
     If http.Status = 200 Then
         responseText = http.responseText
-        matchStart = InStr(responseText, """match"":")
-        If matchStart > 0 Then
-            matchStart = matchStart + 9 ' Skip past "match": "
-            matchEnd = InStr(matchStart, responseText, """")
-            If matchEnd > 0 Then
-                GetAIMatch = Mid(responseText, matchStart, matchEnd - matchStart)
-                Exit Function
-            End If
+
+        Dim parts() As String
+        Dim matchStr As String
+
+        ' Account for optional Flask spaces
+        If InStr(1, responseText, """match"": ") > 0 Then
+            parts = Split(responseText, """match"": ")
+        Else
+            parts = Split(responseText, """match"":")
+        End If
+
+        If UBound(parts) > 0 Then
+            matchStr = Trim(parts(1))
+            If Left(matchStr, 1) = """" Then matchStr = Mid(matchStr, 2)
+
+            Dim i As Long
+            For i = 1 To Len(matchStr)
+                If Mid(matchStr, i, 1) = """" Then
+                    If i = 1 Or Mid(matchStr, i - 1, 1) <> "\" Then
+                        matchStr = Left(matchStr, i - 1)
+                        Exit For
+                    End If
+                End If
+            Next i
+
+            ' Unescape common characters
+            matchStr = Replace(matchStr, "\n", vbLf)
+            matchStr = Replace(matchStr, "\\", "\")
+            matchStr = Replace(matchStr, "\" & """", """")
+
+            GetAIMatch = matchStr
+            Exit Function
         End If
     End If
 

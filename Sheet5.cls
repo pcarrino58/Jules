@@ -259,10 +259,13 @@ End Sub
 ' ============================================================
 Function get_generalized_signature(text As String) As String
     ' A perfectly mirrored VBA clone of your Python Generalizer
-    Dim regEx As Object
-    Set regEx = CreateObject("VBScript.RegExp")
-    regEx.Global = True
-    regEx.IgnoreCase = True
+    Static regEx As Object
+    If regEx Is Nothing Then
+        Set regEx = CreateObject("VBScript.RegExp")
+        regEx.Global = True
+        regEx.IgnoreCase = True
+        regEx.pattern = "\s*#?\s*\d+[a-zA-Z]*$"
+    End If
     
     Dim prevText As String
     text = Trim(text)
@@ -270,7 +273,6 @@ Function get_generalized_signature(text As String) As String
     Do
         prevText = text
         ' Aggressively strip spaces, #, and trailing alphanumeric codes (e.g., " #1", "2B")
-        regEx.pattern = "\s*#?\s*\d+[a-zA-Z]*$"
         text = Trim(regEx.Replace(text, ""))
     Loop Until text = prevText
     
@@ -358,17 +360,33 @@ Private Sub EnsureNoGoodMatchHighlight()
         End If
     Next i
 
-    Dim formulaOriginal As String, formulaNew As String
+    Dim formulaOriginal1 As String, formulaOriginal2 As String, formulaNew As String
+    Dim f1 As String, f2 As String, f3 As String
 
-    formulaOriginal = "=OR($B2=""No good match"", $B2=""No matching words"", $B2=""Click to Review Guess..."", $C2=""Requires AI"", $C2=""Check DB"", $C2=""AI Failed to Resolve"", AND(LEFT($C2,14)=""Multiple Rules"", ISERR(SEARCH(""Resolved"",$C2))), ISNUMBER(SEARCH(""Review AI Guess"",$C2)))"
+    formulaOriginal1 = "=OR($B2=""No good match"", $B2=""No matching words"", $B2=""Click to Review Guess..."", $C2=""Requires AI"", $C2=""Check DB"")"
+    formulaOriginal2 = "=OR($C2=""AI Failed to Resolve"", AND(LEFT($C2,14)=""Multiple Rules"", ISERR(SEARCH(""Resolved"",$C2))), ISNUMBER(SEARCH(""Review AI Guess"",$C2)))"
     formulaNew = "=OR($B2=""Subtype missing input"", $B2=""Missing input phrase"", ISNUMBER(SEARCH(""Click dropdown to view"", $B2)), $C2=""Requires human"", $C2=""Search Results"", $C2=""Invalid Entry"")"
 
-    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaOriginal)
+    ' Apply the formula relative to the ActiveCell by converting A1 -> R1C1 (absolute to row 2) -> A1 (relative to ActiveCell)
+    Dim active As Range
+    Set active = ActiveCell
+    If active Is Nothing Then Set active = applies.Cells(1, 1)
+
+    f1 = Application.ConvertFormula(Application.ConvertFormula(formulaOriginal1, xlA1, xlR1C1, , applies.Cells(1, 1)), xlR1C1, xlA1, , active)
+    f2 = Application.ConvertFormula(Application.ConvertFormula(formulaOriginal2, xlA1, xlR1C1, , applies.Cells(1, 1)), xlR1C1, xlA1, , active)
+    f3 = Application.ConvertFormula(Application.ConvertFormula(formulaNew, xlA1, xlR1C1, , applies.Cells(1, 1)), xlR1C1, xlA1, , active)
+
+    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=f1)
         .Interior.Color = 65535
         .StopIfTrue = False
     End With
 
-    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaNew)
+    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=f2)
+        .Interior.Color = 65535
+        .StopIfTrue = False
+    End With
+
+    With applies.FormatConditions.Add(Type:=xlExpression, Formula1:=f3)
         .Interior.Color = 65535
         .StopIfTrue = False
     End With
