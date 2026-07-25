@@ -253,7 +253,7 @@ load_knowledge_base()
 # ==========================================
 # 2. THE UNIFIED PRE-SCRUB ENGINE
 # ==========================================
-def prescrub_text(raw_text):
+def prescrub_text(raw_text, use_whitelist=True):
     if not isinstance(raw_text, str): return ""
         
     clean = re.sub(r'[\x00-\x09\x0B-\x0C\x0E-\x1F\u200B-\u200D\uFEFF]', '', raw_text)
@@ -270,7 +270,7 @@ def prescrub_text(raw_text):
             
         clean = master_rule_pattern.sub(replace_logic, clean)
             
-    if uniformat_valid_words:
+    if use_whitelist and uniformat_valid_words:
         words = clean.split()
         kept_words = [w for w in words if w in uniformat_valid_words]
         clean = " ".join(kept_words)
@@ -350,7 +350,8 @@ def batch_lookup():
         current_match = item.get('current_match', '').strip().lower()
         current_id = item.get('current_id', '').strip().lower()
 
-        signature = prescrub_text(original_phrase)
+        signature = prescrub_text(original_phrase, use_whitelist=True)
+        semantic_phrase = prescrub_text(original_phrase, use_whitelist=False)
         
         original_clean = re.sub(r'[^a-z0-9\s]', ' ', original_phrase.lower())
         original_base_words = get_stemmed_words(original_clean)
@@ -400,8 +401,8 @@ def batch_lookup():
         if multi_match_found:
             continue
 
-        if len(signature) >= 2:
-            ai_queue_phrases.append(signature)
+        if len(semantic_phrase) >= 2:
+            ai_queue_phrases.append(semantic_phrase)
             ai_queue_rows.append(row_id)
             original_phrases_list.append(original_phrase)
         else:
@@ -411,9 +412,9 @@ def batch_lookup():
         unique_candidates = set()
         item_candidates_list = []
 
-        for signature in ai_queue_phrases:
-            candidates_set = {signature}
-            words = signature.split()
+        for semantic_phrase in ai_queue_phrases:
+            candidates_set = {semantic_phrase}
+            words = semantic_phrase.split()
             for n in range(1, 6):
                 if len(words) >= n:
                     for j in range(len(words) - n + 1):
@@ -429,7 +430,7 @@ def batch_lookup():
 
         top_k = min(20, len(lookup_phrases))
 
-        for i_queue, signature in enumerate(ai_queue_phrases):
+        for i_queue, semantic_phrase in enumerate(ai_queue_phrases):
             row_id = ai_queue_rows[i_queue]
             original_phrase_for_rule = original_phrases_list[i_queue]
             
@@ -441,7 +442,9 @@ def batch_lookup():
             indices = [cand_to_idx[c] for c in candidates]
             candidate_norms = unique_norms[indices]
 
-            base_words = get_stemmed_words(signature)
+            # F1 overlap should use the strict signature to prevent penalty from non-whitelisted words
+            strict_signature = prescrub_text(original_phrase_for_rule, use_whitelist=True)
+            base_words = get_stemmed_words(strict_signature)
             all_semantic_scores = np.dot(candidate_norms, lookup_embeddings.T)
 
             collected_matches = []
@@ -531,7 +534,9 @@ def batch_file():
         row_id = str(row['Row'])
         original_phrase = str(row.get('Phrase', '')).strip()
 
-        signature = prescrub_text(original_phrase)
+        signature = prescrub_text(original_phrase, use_whitelist=True)
+        semantic_phrase = prescrub_text(original_phrase, use_whitelist=False)
+
         original_clean = re.sub(r'[^a-z0-9\s]', ' ', original_phrase.lower())
         original_base_words = get_stemmed_words(original_clean)
 
@@ -572,8 +577,8 @@ def batch_file():
         if multi_match_found:
             continue
 
-        if len(signature) >= 2:
-            ai_queue_phrases.append(signature)
+        if len(semantic_phrase) >= 2:
+            ai_queue_phrases.append(semantic_phrase)
             ai_queue_rows.append(row_id)
             original_phrases_list.append(original_phrase)
         else:
@@ -583,9 +588,9 @@ def batch_file():
         unique_candidates = set()
         item_candidates_list = []
 
-        for signature in ai_queue_phrases:
-            candidates_set = {signature}
-            words = signature.split()
+        for semantic_phrase in ai_queue_phrases:
+            candidates_set = {semantic_phrase}
+            words = semantic_phrase.split()
             for n in range(1, 6):
                 if len(words) >= n:
                     for j in range(len(words) - n + 1):
@@ -601,7 +606,7 @@ def batch_file():
 
         top_k = min(20, len(lookup_phrases))
 
-        for i_queue, signature in enumerate(ai_queue_phrases):
+        for i_queue, semantic_phrase in enumerate(ai_queue_phrases):
             row_id = ai_queue_rows[i_queue]
             original_phrase = original_phrases_list[i_queue]
             
@@ -613,7 +618,9 @@ def batch_file():
             indices = [cand_to_idx[c] for c in candidates]
             candidate_norms = unique_norms[indices]
 
-            base_words = get_stemmed_words(signature)
+            # F1 overlap should use the strict signature to prevent penalty from non-whitelisted words
+            strict_signature = prescrub_text(original_phrase, use_whitelist=True)
+            base_words = get_stemmed_words(strict_signature)
             all_semantic_scores = np.dot(candidate_norms, lookup_embeddings.T)
 
             collected_matches = []
