@@ -147,20 +147,22 @@ Private Sub Worksheet_Change(ByVal Target As Range)
                     If Len(vList) > 0 Then
                         If Left(vList, 1) = "=" Then
                             ' It's a named range list
-                            Dim rList As Range
+                            Dim rList As Variant
                             On Error Resume Next
-                            Set rList = Evaluate(vList)
+                            rList = Evaluate(vList)
                             Err.Clear
                             On Error GoTo ErrorHandler
                             
-                            If Not rList Is Nothing Then
-                                Dim cItem As Range
-                                For Each cItem In rList
-                                    If LCase(Trim$(CStr(cItem.Value2))) = LCase(valToLearn) Then
-                                        isValid = True
-                                        Exit For
+                            If Not IsEmpty(rList) Then
+                                Dim rItem As Variant
+                                For Each rItem In rList
+                                    If Not IsError(rItem) Then
+                                        If LCase(Trim$(CStr(rItem))) = LCase(valToLearn) Then
+                                            isValid = True
+                                            Exit For
+                                        End If
                                     End If
-                                Next cItem
+                                Next rItem
                             End If
                         Else
                             ' It's a comma-separated list
@@ -270,11 +272,8 @@ Function get_generalized_signature(text As String) As String
     Dim prevText As String
     text = Trim(text)
     
-    Do
-        prevText = text
-        ' Aggressively strip spaces, #, and trailing alphanumeric codes (e.g., " #1", "2B")
-        text = Trim(regEx.Replace(text, ""))
-    Loop Until text = prevText
+    ' Aggressively strip spaces, #, and trailing alphanumeric codes (e.g., " #1", "2B")
+    text = Trim(regEx.Replace(text, ""))
     
     get_generalized_signature = LCase(text)
 End Function

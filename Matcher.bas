@@ -223,7 +223,11 @@ Public Sub RecordLearnedOverride(ByVal rowNum As Long)
     ' --------------------------------------
 
     chosen = SanitizeLearnedOutput(chosen)
-    If Not IsValidOutputList(chosen) Then Exit Sub
+
+    ' If the output isn't explicitly in the valid uniformat list, we skip permanent learning,
+    ' but we STILL want it to auto-propagate to other cells locally!
+    If Not IsValidOutputList(chosen) Then skipPermanentSave = True
+
     If Len(Trim$(rawInput)) = 0 Then Exit Sub
     If Len(Trim$(chosen)) = 0 Then Exit Sub
 
@@ -1836,11 +1840,7 @@ Public Function BuildLearnSignature(ByVal text As String) As String
     text = Trim(text)
 
     ' Aggressively strip spaces, #, and trailing alphanumeric codes (e.g., " #1", "2B")
-    Dim prevText As String
-    Do
-        prevText = text
-        text = Trim(regEx.Replace(text, ""))
-    Loop Until text = prevText
+    text = Trim(regEx.Replace(text, ""))
 
     BuildLearnSignature = LCase(text)
 End Function
