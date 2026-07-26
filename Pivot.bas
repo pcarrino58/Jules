@@ -32,11 +32,16 @@ Public Sub PivotBuilder_Rebuild()
     Dim panelStart As Range
     Dim startCol As Long
      
+    On Error GoTo ErrorHandler
     Application.ScreenUpdating = False
     Application.EnableEvents = False
      
     ' 1. FLATTEN DATA SILENTLY
-    Call AutoFlattenData
+    If Not AutoFlattenData() Then
+        Application.EnableEvents = True
+        Application.ScreenUpdating = True
+        Exit Sub
+    End If
      
     ' 2. SOURCE VALIDATION
     On Error Resume Next
@@ -95,6 +100,12 @@ Public Sub PivotBuilder_Rebuild()
      
     Application.EnableEvents = True
     Application.ScreenUpdating = True
+    Exit Sub
+
+ErrorHandler:
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+    MsgBox "An error occurred while building the Pivot Table." & vbCrLf & "Error " & Err.Number & ": " & Err.Description, vbCritical, "Pivot Builder Error"
 End Sub
  
 Public Sub PivotBuilder_Refresh()
@@ -104,7 +115,7 @@ End Sub
 ' =========================================================================
 ' The invisible data prep engine.
 ' =========================================================================
-Private Sub AutoFlattenData()
+Private Function AutoFlattenData() As Boolean
     Dim WsSrc As Worksheet, wsDest As Worksheet
     Dim arrData As Variant, arrOut() As Variant
     Dim lastRow As Long, lastCol As Long
@@ -136,7 +147,8 @@ Private Sub AutoFlattenData()
         ' Copy headers only and exit so pivot creates empty
         WsSrc.Rows(1).Copy wsDest.Rows(1)
         wsDest.Cells(1, lastCol + 1).Value = FLD_SPECIFIC_TRADE
-        Exit Sub
+        AutoFlattenData = True
+        Exit Function
     End If
       
     arrData = WsSrc.Range(WsSrc.Cells(1, 1), WsSrc.Cells(lastRow, lastCol)).Value
@@ -153,7 +165,8 @@ Private Sub AutoFlattenData()
       
 If colWho = 0 Or colTotal = 0 Or colMat = 0 Or colBld = 0 Or colZone = 0 Then
         ' Bypass the hard crash so your paste operations never get blocked again
-        Exit Sub
+        AutoFlattenData = False
+        Exit Function
     End If
       
     ReDim arrOut(1 To lastRow * 3, 1 To lastCol + 1)
@@ -223,7 +236,8 @@ If colWho = 0 Or colTotal = 0 Or colMat = 0 Or colBld = 0 Or colZone = 0 Then
     Else
         wsDest.Range(wsDest.Cells(1, 1), wsDest.Cells(1, lastCol + 1)).Value = arrOut
     End If
-End Sub
+    AutoFlattenData = True
+End Function
 Private Function CheckHeaders(ByVal src As Range, ByVal names As Variant) As String
     Dim f As Variant, found As Range
     For Each f In names

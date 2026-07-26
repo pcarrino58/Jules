@@ -256,7 +256,7 @@ CleanExit:
     ' Only run the refresh if we are NOT currently trying to open a search dropdown
     If Target.Cells.count < 50 And isSearching = False Then
         Call Matcher.CalculatePMRules(Me)
-        ' Call PivotBuilder_Refresh  <--- ADD THIS QUOTE HERE
+        Call PivotBuilder_Refresh
     End If
     On Error GoTo 0
 
