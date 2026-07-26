@@ -184,50 +184,54 @@ If colWho = 0 Or colTotal = 0 Or colMat = 0 Or colBld = 0 Or colZone = 0 Then
         bldRaw = Application.WorksheetFunction.clean(Trim$(SafeStr(arrData(i, colBld))))
         bldRaw = Replace(bldRaw, Chr(160), "") ' Removes HTML spaces
          
-        ' Filter out blanks AND literal zeroes returning from empty formulas
-        If Len(bldRaw) > 0 And LCase$(bldRaw) <> "(blank)" And bldRaw <> "0" Then
+        ' Assign default fallback label if building is blank or literal zero
+        If Len(bldRaw) = 0 Or LCase$(bldRaw) = "(blank)" Or bldRaw = "0" Then
+            bldRaw = "Unassigned Building"
+        End If
+
+        ' Also update the array value so the fallback is carried over to the output
+        arrData(i, colBld) = bldRaw
+
+        tradeRaw = SafeStr(arrData(i, colWho))
+        matCost = NzDbl(arrData(i, colMat))
+        tot = NzDbl(arrData(i, colTotal))
+
+        If InStr(tradeRaw, "/") > 0 Then
+            tradesArr = Split(tradeRaw, "/")
              
-            tradeRaw = SafeStr(arrData(i, colWho))
-            matCost = NzDbl(arrData(i, colMat))
-            tot = NzDbl(arrData(i, colTotal))
+            If colMulti1 > 0 Then hrs1 = NzDbl(arrData(i, colMulti1)) Else hrs1 = 0
+            If colMulti2 > 0 Then hrs2 = NzDbl(arrData(i, colMulti2)) Else hrs2 = 0
               
-            If InStr(tradeRaw, "/") > 0 Then
-                tradesArr = Split(tradeRaw, "/")
-                 
-                If colMulti1 > 0 Then hrs1 = NzDbl(arrData(i, colMulti1)) Else hrs1 = 0
-                If colMulti2 > 0 Then hrs2 = NzDbl(arrData(i, colMulti2)) Else hrs2 = 0
-                  
-                ' ROW A: First Trade
+            ' ROW A: First Trade
+            For j = 1 To lastCol: arrOut(outRow, j) = arrData(i, j): Next j
+            arrOut(outRow, colWho) = tradeRaw
+            arrOut(outRow, lastCol + 1) = Trim(tradesArr(0))
+            arrOut(outRow, colTotal) = hrs1
+            arrOut(outRow, colMat) = 0
+            outRow = outRow + 1
+
+            ' ROW B: Second Trade
+            For j = 1 To lastCol: arrOut(outRow, j) = arrData(i, j): Next j
+            arrOut(outRow, colWho) = tradeRaw
+            arrOut(outRow, lastCol + 1) = Trim(tradesArr(UBound(tradesArr)))
+            arrOut(outRow, colTotal) = hrs2
+            arrOut(outRow, colMat) = 0
+            outRow = outRow + 1
+
+            ' ROW C: Shared Materials
+            If matCost <> 0 Then
                 For j = 1 To lastCol: arrOut(outRow, j) = arrData(i, j): Next j
                 arrOut(outRow, colWho) = tradeRaw
-                arrOut(outRow, lastCol + 1) = Trim(tradesArr(0))
-                arrOut(outRow, colTotal) = hrs1
-                arrOut(outRow, colMat) = 0
-                outRow = outRow + 1
-                  
-                ' ROW B: Second Trade
-                For j = 1 To lastCol: arrOut(outRow, j) = arrData(i, j): Next j
-                arrOut(outRow, colWho) = tradeRaw
-                arrOut(outRow, lastCol + 1) = Trim(tradesArr(UBound(tradesArr)))
-                arrOut(outRow, colTotal) = hrs2
-                arrOut(outRow, colMat) = 0
-                outRow = outRow + 1
-                 
-                ' ROW C: Shared Materials
-                If matCost <> 0 Then
-                    For j = 1 To lastCol: arrOut(outRow, j) = arrData(i, j): Next j
-                    arrOut(outRow, colWho) = tradeRaw
-                    arrOut(outRow, lastCol + 1) = "Shared Materials"
-                    arrOut(outRow, colTotal) = 0
-                    arrOut(outRow, colMat) = matCost
-                    outRow = outRow + 1
-                End If
-            Else
-                For j = 1 To lastCol: arrOut(outRow, j) = arrData(i, j): Next j
-                arrOut(outRow, lastCol + 1) = tradeRaw
+                arrOut(outRow, lastCol + 1) = "Shared Materials"
+                arrOut(outRow, colTotal) = 0
+                arrOut(outRow, colMat) = matCost
                 outRow = outRow + 1
             End If
-        End If ' End of Building Check
+        Else
+            For j = 1 To lastCol: arrOut(outRow, j) = arrData(i, j): Next j
+            arrOut(outRow, lastCol + 1) = tradeRaw
+            outRow = outRow + 1
+        End If
     Next i
       
     ' Write output (Ensures we don't crash if the sheet is 100% empty)
@@ -417,49 +421,50 @@ Private Sub WriteTotalsPanel_FromSource(ByVal pt As PivotTable, ByVal WsOut As W
             h = NzDbl(SrcData.Cells(i, colH).Value)
             c = NzDbl(SrcData.Cells(i, colC).Value)
              
-            If Len(b) > 0 And LCase$(b) <> "(blank)" Then
+            If Len(b) = 0 Or LCase$(b) = "(blank)" Or b = "0" Then
+                b = "Unassigned Building"
+            End If
+
+            ' --- TALLY BUILDING TOTALS ---
+            If Not dict.Exists(b) Then dict.Add b, Array(0#, 0#)
+            v = dict(b)
+            v(0) = v(0) + h
+            v(1) = v(1) + c
+            dict(b) = v
+
+            grandH = grandH + h
+            grandC = grandC + c
+
+            ' --- TALLY INDIVIDUAL TRADE HOURS ---
+            If colWho > 0 Then
+                Dim tradeRaw As String
+                tradeRaw = Trim$(SafeStr(SrcData.Cells(i, colWho).Value))
                  
-                ' --- TALLY BUILDING TOTALS ---
-                If Not dict.Exists(b) Then dict.Add b, Array(0#, 0#)
-                v = dict(b)
-                v(0) = v(0) + h
-                v(1) = v(1) + c
-                dict(b) = v
+                If Len(tradeRaw) = 0 Or LCase$(tradeRaw) = "(blank)" Then
+                    tradeRaw = "Unassigned (Blank Trade)"
+                End If
                  
-                grandH = grandH + h
-                grandC = grandC + c
-                 
-                ' --- TALLY INDIVIDUAL TRADE HOURS ---
-                If colWho > 0 Then
-                    Dim tradeRaw As String
-                    tradeRaw = Trim$(SafeStr(SrcData.Cells(i, colWho).Value))
+                If InStr(tradeRaw, "/") > 0 Then
+                    Dim tArr() As String
+                    Dim t1 As String, t2 As String
+                    Dim h1 As Double, h2 As Double
+
+                    tArr = Split(tradeRaw, "/")
+                    t1 = Trim$(tArr(0))
+                    t2 = Trim$(tArr(UBound(tArr)))
+
+                    ' Pull the exact numbers from Columns Q and S (which already contain all the math)
+                    If colM1 > 0 Then h1 = NzDbl(SrcData.Cells(i, colM1).Value) Else h1 = 0
+                    If colM2 > 0 Then h2 = NzDbl(SrcData.Cells(i, colM2).Value) Else h2 = 0
                      
-                    If Len(tradeRaw) = 0 Or LCase$(tradeRaw) = "(blank)" Then
-                        tradeRaw = "Unassigned (Blank Trade)"
-                    End If
+                    If Not tradeDict.Exists(t1) Then tradeDict.Add t1, 0#
+                    If Not tradeDict.Exists(t2) Then tradeDict.Add t2, 0#
                      
-                    If InStr(tradeRaw, "/") > 0 Then
-                        Dim tArr() As String
-                        Dim t1 As String, t2 As String
-                        Dim h1 As Double, h2 As Double
-                         
-                        tArr = Split(tradeRaw, "/")
-                        t1 = Trim$(tArr(0))
-                        t2 = Trim$(tArr(UBound(tArr)))
-                         
-                        ' Pull the exact numbers from Columns Q and S (which already contain all the math)
-                        If colM1 > 0 Then h1 = NzDbl(SrcData.Cells(i, colM1).Value) Else h1 = 0
-                        If colM2 > 0 Then h2 = NzDbl(SrcData.Cells(i, colM2).Value) Else h2 = 0
-                         
-                        If Not tradeDict.Exists(t1) Then tradeDict.Add t1, 0#
-                        If Not tradeDict.Exists(t2) Then tradeDict.Add t2, 0#
-                         
-                        tradeDict(t1) = tradeDict(t1) + h1
-                        tradeDict(t2) = tradeDict(t2) + h2
-                    Else
-                        If Not tradeDict.Exists(tradeRaw) Then tradeDict.Add tradeRaw, 0#
-                        tradeDict(tradeRaw) = tradeDict(tradeRaw) + h
-                    End If
+                    tradeDict(t1) = tradeDict(t1) + h1
+                    tradeDict(t2) = tradeDict(t2) + h2
+                Else
+                    If Not tradeDict.Exists(tradeRaw) Then tradeDict.Add tradeRaw, 0#
+                    tradeDict(tradeRaw) = tradeDict(tradeRaw) + h
                 End If
             End If
         End If
