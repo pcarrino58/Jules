@@ -244,7 +244,7 @@ def load_knowledge_base():
     if os.path.exists(custom_rules_file):
         try:
             print(f"Reading Learned Mappings from {custom_rules_file}...")
-            with open(custom_rules_file, "r", encoding="utf-8") as f:
+            with open(custom_rules_file, "r", encoding="utf-8-sig") as f:
                 with custom_rules_lock:
                     custom_rules.clear()
                     for line in f:
@@ -284,8 +284,6 @@ def prescrub_text(raw_text, use_whitelist=True):
         
     clean = re.sub(r'[\x00-\x09\x0B-\x0C\x0E-\x1F\u200B-\u200D\uFEFF]', '', raw_text)
     clean = clean.replace('\xa0', ' ').strip().lower()
-    clean = re.sub(r'[^a-z0-9\s]', ' ', clean)
-    
     if master_rule_pattern:
         def replace_logic(m):
             match_word = m.group(0).lower()
@@ -295,6 +293,8 @@ def prescrub_text(raw_text, use_whitelist=True):
             return target_text.split('\n')[0].lower()
             
         clean = master_rule_pattern.sub(replace_logic, clean)
+
+    clean = re.sub(r'[^a-z0-9\s]', ' ', clean)
             
     if use_whitelist and uniformat_valid_words:
         words = clean.split()
@@ -351,7 +351,7 @@ def learn_rule():
             custom_rules[signature] = corrected_match
             diskMap = {}
             if os.path.exists(custom_rules_file):
-                with open(custom_rules_file, "r", encoding="utf-8") as f:
+                with open(custom_rules_file, "r", encoding="utf-8-sig") as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -363,7 +363,7 @@ def learn_rule():
             diskMap[signature] = f"{signature}|{corrected_match}|{signature}|{now_str}"
             
             temp_file = custom_rules_file + ".tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
+            with open(temp_file, "w", encoding="utf-8-sig") as f:
                 for k, v in diskMap.items(): f.write(f"{v}\n")
             os.replace(temp_file, custom_rules_file)
 
@@ -417,7 +417,7 @@ def batch_lookup():
                     rule_words = get_stemmed_words(rule_key)
                     if not rule_words: continue
                     intersection = len(sig_words.intersection(rule_words))
-                    overlap = intersection / len(rule_words) if len(rule_words) > 0 else 0.0
+                    overlap = (2.0 * intersection) / (len(sig_words) + len(rule_words)) if (len(sig_words) + len(rule_words)) > 0 else 0.0
                     # 90% threshold to prevent false positive typo matches
                     if overlap > best_mem_score and overlap >= 0.90:
                         best_mem_score = overlap
@@ -580,7 +580,7 @@ def batch_file():
                     rule_words = get_stemmed_words(rule_key)
                     if not rule_words: continue
                     intersection = len(sig_words.intersection(rule_words))
-                    overlap = intersection / len(rule_words) if len(rule_words) > 0 else 0.0
+                    overlap = (2.0 * intersection) / (len(sig_words) + len(rule_words)) if (len(sig_words) + len(rule_words)) > 0 else 0.0
                     # 90% threshold to prevent false positive typo matches
                     if overlap > best_mem_score and overlap >= 0.90:
                         best_mem_score = overlap
