@@ -26,7 +26,7 @@ embedder = SentenceTransformer('all-MiniLM-L6-v2', device=device)
 script_dir = os.path.dirname(os.path.abspath(__file__))
 appdata = os.environ.get('APPDATA', '')
 if not appdata:
-    appdata = os.path.expanduser('~') 
+    appdata = os.path.expanduser('~')
 
 # Thread locks for safe hot-reloading
 custom_rules_lock = threading.Lock()
@@ -34,19 +34,19 @@ knowledge_base_lock = threading.Lock()
 
 # Global variables
 lookup_phrases = []
-lookup_phrases_original = [] 
-canonical_casing = {}        
+lookup_phrases_original = []
+canonical_casing = {}
 lookup_words_sets = []
 lookup_embeddings = None
 
 industry_translations = {}
 broad_categories = []
 
-compiled_expert_rules = [] 
-compiled_broad_categories = [] 
+compiled_expert_rules = []
+compiled_broad_categories = []
 
 uniformat_valid_words = set()
-stemmed_whitelist = set() 
+stemmed_whitelist = set()
 master_rule_pattern = None
 custom_rules = {}
 
@@ -60,7 +60,7 @@ COMPILED_LOCATION_PATTERNS = [
     re.compile(r'\b(?:parking )?garage\b', re.IGNORECASE),
     re.compile(r'\b(?:level|floor|fl)\s*\d+[a-z]*\b', re.IGNORECASE),
     re.compile(r'\b\d+(?:st|nd|rd|th)?\s+(?:floor|fl|level)\b', re.IGNORECASE),
-    re.compile(r'\bp\d+\b', re.IGNORECASE), 
+    re.compile(r'\bp\d+\b', re.IGNORECASE),
     re.compile(r'\b(?:mechanical|elec|electrical|boiler|pump|utility|telecom|it|server|data|storage|mail)\s+room\b', re.IGNORECASE)
 ]
 
@@ -82,7 +82,7 @@ HIERARCHY_RULES = [
     {
         "group": "Emergency Power",
         "parents": [r'\bgenerator', r'\bgenset', r'\bdiesel gen', r'\bgas gen'],
-        "children": [r'\bats\b', r'\bautomatic transfer switch', r'\btransfer switch', r'\bload bank'] 
+        "children": [r'\bats\b', r'\bautomatic transfer switch', r'\btransfer switch', r'\bload bank']
     },
     {
         "group": "Vertical Transport",
@@ -147,7 +147,7 @@ def get_stemmed_words(text):
 def validate_and_format(match_str):
     if not match_str or match_str in ["No good match", "REQUIRES HUMAN", "SKIP"]:
         return match_str
-    
+
     if "\n" in match_str:
         valid_parts = []
         for part in match_str.split("\n"):
@@ -155,7 +155,7 @@ def validate_and_format(match_str):
             if clean: valid_parts.append(clean)
         if valid_parts: return "\n".join(valid_parts)
         return "No good match"
-    
+
     clean_match = canonical_casing.get(match_str.strip().lower())
     return clean_match if clean_match else "No good match"
 
@@ -171,7 +171,7 @@ def load_knowledge_base():
 
     appdata = os.environ.get('APPDATA', '')
     if not appdata: appdata = os.path.expanduser('~')
-        
+
     lookups_file = os.path.join(appdata, "Uniformat_Lookups.txt")
     rules_file = os.path.join(appdata, "Uniformat_Rules.txt")
     custom_rules_file = os.path.join(appdata, "Uniformat_Learned.txt")
@@ -195,15 +195,15 @@ def load_knowledge_base():
                     if len(parts) >= 1:
                         clean_phrase = parts[0].strip()
                         uf_code = parts[1].strip() if len(parts) > 1 else ""
-                        
+
                         if clean_phrase and uf_code:
                             lower_phrase = clean_phrase.lower()
                             stripped_phrase = NON_ALNUM_PATTERN.sub(' ', lower_phrase)
                             stripped_phrase = MULTI_SPACE_PATTERN.sub(' ', stripped_phrase).strip()
-                            
+
                             paired.append((stripped_phrase, clean_phrase))
                             t_canonical_casing[lower_phrase] = clean_phrase
-                            
+
                             for word in stripped_phrase.split():
                                 t_uniformat_valid_words.add(word)
 
@@ -233,7 +233,7 @@ def load_knowledge_base():
                         rule_type = parts[0].strip().lower()
                         from_text = parts[1].strip().lower()
                         to_text = parts[2].strip().replace('|', '\n')
-                        
+
                         if rule_type in ["alias", "phrase", "list"]:
                             t_industry_translations[from_text] = to_text
                             for word in re.findall(r'[a-z0-9]+', to_text.lower()):
@@ -280,7 +280,7 @@ def load_knowledge_base():
 
     sorted_messy_terms = sorted(t_industry_translations.keys(), key=len, reverse=True)
     if sorted_messy_terms:
-        escaped_keys = [r'\b' + re.escape(k) + r'(?:s|es)?\b' for k in sorted_messy_terms]
+        escaped_keys = [r'(?<![a-z0-9])' + re.escape(k) + r'(?:s|es)?(?![a-z0-9])' for k in sorted_messy_terms]
         t_master_rule_pattern = re.compile('(' + '|'.join(escaped_keys) + ')', flags=re.IGNORECASE)
     else:
         t_master_rule_pattern = None
@@ -328,42 +328,42 @@ load_knowledge_base()
 # 2. THE UNIFIED PRE-SCRUB & LOCAL AI ENGINE
 # ==========================================
 def extract_locations(raw_text):
-    if not isinstance(raw_text, str): 
+    if not isinstance(raw_text, str):
         return "", raw_text
     locations = []
     clean_base = raw_text.strip()
-    
+
     for pattern in COMPILED_LOCATION_PATTERNS:
         matches = pattern.findall(clean_base)
         for m in matches:
             locations.append(m)
             clean_base = re.sub(r'\b' + re.escape(m) + r'\b', '', clean_base, flags=re.IGNORECASE)
-            
+
     clean_base = MULTI_SPACE_PATTERN.sub(' ', clean_base).strip()
     extracted = " | ".join(sorted(set([loc.title() for loc in locations])))
     return extracted, clean_base
 
 def extract_asset_identifiers(raw_text):
-    if not isinstance(raw_text, str): 
+    if not isinstance(raw_text, str):
         return "", raw_text
     identifiers = []
     clean_base = raw_text.strip()
-    
+
     # --- BUG 1 FIXED: Uses Regex .sub() instead of String .replace() ---
     hash_tags = HASH_TAG_PATTERN.findall(clean_base)
     identifiers.extend(hash_tags)
     clean_base = HASH_TAG_PATTERN.sub('', clean_base)
-        
+
     rooms = ROOM_PATTERN.findall(clean_base)
     identifiers.extend(rooms)
     clean_base = ROOM_PATTERN.sub('', clean_base)
-        
+
     clean_base = clean_base.strip()
     trailing_num = TRAILING_NUM_PATTERN.search(clean_base)
     if trailing_num and not hash_tags:
         identifiers.append(trailing_num.group(1))
         clean_base = clean_base[:trailing_num.start()]
-        
+
     return " ".join(identifiers).strip(), clean_base.strip()
 
 def purify_text(scrubbed_text, current_valid_words, current_stemmed_whitelist):
@@ -371,7 +371,7 @@ def purify_text(scrubbed_text, current_valid_words, current_stemmed_whitelist):
         return ""
     if not current_valid_words:
         return scrubbed_text
-        
+
     pure_words = []
     for w in scrubbed_text.split():
         if w in current_valid_words:
@@ -380,26 +380,25 @@ def purify_text(scrubbed_text, current_valid_words, current_stemmed_whitelist):
             stem_set = get_stemmed_words(w)
             w_stem = list(stem_set)[0] if stem_set else ""
             if w_stem in current_stemmed_whitelist:
-                pure_words.append(w)  
+                pure_words.append(w)
     pure = " ".join(pure_words)
     return pure if pure else scrubbed_text
 
 def prescrub_text(raw_text, use_whitelist=True, current_valid_words=None, current_stemmed_whitelist=None, current_pattern=None):
     if not isinstance(raw_text, str): return ""
-        
+
     clean = CONTROL_CHAR_PATTERN.sub('', raw_text)
     clean = clean.replace('\xa0', ' ').strip().lower()
-    
-    # 1. STRIP PUNCTUATION FIRST
-    clean = NON_ALNUM_PATTERN.sub(' ', clean)
+
+    # 1. NORMALIZE SPACES FIRST
     clean = MULTI_SPACE_PATTERN.sub(' ', clean).strip()
-    
+
     # 2. APPLY RULES ON THE CLEANED TEXT
     if current_pattern:
         def replace_logic(m):
             match_word = m.group(0).lower()
             target_text = industry_translations.get(match_word)
-            
+
             # If the exact plural matched the regex but isn't in the dictionary, strip the 's'
             if target_text is None:
                 if match_word.endswith('es') and match_word[:-2] in industry_translations:
@@ -408,16 +407,20 @@ def prescrub_text(raw_text, use_whitelist=True, current_valid_words=None, curren
                     target_text = industry_translations.get(match_word[:-1])
                 else:
                     target_text = ""
-                    
+
             if '\n' in target_text:
                 return match_word
             return target_text.split('\n')[0].lower()
-        
+
         clean = current_pattern.sub(replace_logic, clean)
 
-    # 3. FINAL CLEANUP
+    # 3. STRIP PUNCTUATION
+    clean = NON_ALNUM_PATTERN.sub(' ', clean)
+    clean = MULTI_SPACE_PATTERN.sub(' ', clean).strip()
+
+    # 4. FINAL CLEANUP
     clean = TRAILING_DIGIT_PATTERN.sub('', clean).strip()
-    
+
     if use_whitelist and current_valid_words is not None:
         clean = purify_text(clean, current_valid_words, current_stemmed_whitelist)
     return clean
@@ -428,32 +431,32 @@ def prescrub_text(raw_text, use_whitelist=True, current_valid_words=None, curren
 PM_SUITABILITY_RULES = {
     "Comprehensive PM": [
         # Core Mechanical, Cooling & Heating
-        r'\bchiller\b', r'\bboiler\b', r'\bgenerator\b', r'\belevator\b', r'\bescalator\b', 
+        r'\bchiller\b', r'\bboiler\b', r'\bgenerator\b', r'\belevator\b', r'\bescalator\b',
         r'\bair handling unit\b', r'\bartu\b', r'\bcooling tower\b', r'\bmake up air\b', r'\bmau\b',
         r'\bpackage ac\b', r'\bsplit system\b', r'\bair conditioner\b', r'\bhumidifier\b',
-        
+
         # HVAC & Air Distribution
-        r'\bvav\b', r'\bfan coil\b', r'\bfcu\b', r'\bfan\b', 
+        r'\bvav\b', r'\bfan coil\b', r'\bfcu\b', r'\bfan\b',
         r'\bunit heater\b', r'\bradiant heater\b', r'\bair terminal\b',
-        
+
         # Pumps, Compressors & Fluid Handling
-        r'\bpump\b', r'\bair compressor\b', r'\bsteam trap\b', r'\bprv\b', 
+        r'\bpump\b', r'\bair compressor\b', r'\bsteam trap\b', r'\bprv\b',
         r'\bstandpipe\b', r'\briser\b', r'\bbackflow\b',
-        
+
         # Electrical Infrastructure
-        r'\bpanel\b', r'\btransformer\b', r'\bbreaker\b', r'\bswitch\b', 
+        r'\bpanel\b', r'\btransformer\b', r'\bbreaker\b', r'\bswitch\b',
         r'\bemergency lighting\b', r'\bengine\b', r'\bcircuits\b',
-        
+
         # Life Safety, Security & Environmental
-        r'\bfire extinguisher\b', r'\bfire system\b', r'\bsprinkler\b', 
-        r'\bfire hose cabinet\b', r'\bfire alarm\b', r'\bdetector\b', 
-        r'\bpull station\b', r'\bsecurity system\b', r'\baccess control\b', 
+        r'\bfire extinguisher\b', r'\bfire system\b', r'\bsprinkler\b',
+        r'\bfire hose cabinet\b', r'\bfire alarm\b', r'\bdetector\b',
+        r'\bpull station\b', r'\bsecurity system\b', r'\baccess control\b',
         r'\bvideo surveillance\b', r'\bfirefighter\b', r'\beyewash\b', r'\beye wash\b',
-        r'\bair quality\b', r'\bgas\s?(?:sensor|detector|monitor)\b', 
+        r'\bair quality\b', r'\bgas\s?(?:sensor|detector|monitor)\b',
         r'\b(?:co|co2|oxygen)\s?(?:sensor|detector|monitor)\b'
     ],
     "Non-PM": [
-        r'\bwindow\b', r'\bexit sign\b', r'\bpipe\b', r'\bmanual valve\b', 
+        r'\bwindow\b', r'\bexit sign\b', r'\bpipe\b', r'\bmanual valve\b',
         r'\bductwork\b', r'\bwall\b', r'\bwashroom\b', r'\bjanitor\b'
     ],
     "Questionable": [
@@ -480,7 +483,7 @@ def categorize_asset(scrubbed_phrase):
 def ask_maintenance_director_ollama(raw_phrase, lookups_sample):
     url = "http://localhost:11434/api/generate"
     sample = lookups_sample if lookups_sample else []
-    
+
     prompt = f"""
 You are an expert Maintenance Director processing a raw, messy client asset registry.
 Your job is to identify what the asset actually is and align it with a standard CMMS asset lookup type.
@@ -514,7 +517,7 @@ Respond ONLY in valid JSON with these exact keys:
             return json.loads(response.json().get("response", ""))
     except Exception as e:
         print(f"Ollama API Error: {e}")
-    
+
     return None
 
 # ==========================================
@@ -534,7 +537,7 @@ def run_ai_batch_processing(items, is_batch_file=False):
     with custom_rules_lock:
         sorted_custom_rules = sorted(custom_rules.items(), key=lambda x: len(x[0]), reverse=True)
         compiled_custom_rules = [
-            (re.compile(r'\b' + re.escape(k) + r'(?:s|es)?\b'), v, get_stemmed_words(k)) 
+            (re.compile(r'\b' + re.escape(k) + r'(?:s|es)?\b'), v, get_stemmed_words(k))
             for k, v in sorted_custom_rules if k
         ]
 
@@ -569,13 +572,13 @@ def run_ai_batch_processing(items, is_batch_file=False):
                 results.append({k_row: row_id, k_match: "SKIP", k_id: "SKIP"})
                 continue
 
-        signature = prescrub_text(original_phrase, use_whitelist=True, 
-                                  current_valid_words=local_valid_words, 
+        signature = prescrub_text(original_phrase, use_whitelist=True,
+                                  current_valid_words=local_valid_words,
                                   current_stemmed_whitelist=local_stemmed_whitelist,
                                   current_pattern=local_master_rule_pattern)
-        
-        semantic_phrase = prescrub_text(original_phrase, use_whitelist=False, 
-                                        current_valid_words=local_valid_words, 
+
+        semantic_phrase = prescrub_text(original_phrase, use_whitelist=False,
+                                        current_valid_words=local_valid_words,
                                         current_stemmed_whitelist=local_stemmed_whitelist,
                                         current_pattern=local_master_rule_pattern)
 
@@ -596,7 +599,7 @@ def run_ai_batch_processing(items, is_batch_file=False):
                 intersection = len(sig_words.intersection(rule_words))
                 total_len = len(sig_words) + len(rule_words)
                 overlap = (2.0 * intersection) / total_len if total_len > 0 else 0.0
-                
+
                 if overlap > best_mem_score and overlap >= 0.90:
                     best_mem_score = overlap
                     match_found = rule_val
@@ -611,7 +614,7 @@ def run_ai_batch_processing(items, is_batch_file=False):
         for messy_term, rule_tokens, clean_term in local_compiled_expert_rules:
             if rule_tokens.issubset(original_base_words):
                 matched_rules.append((messy_term, clean_term))
-                
+
         expert_matches = []
         for i, (term1, clean1) in enumerate(matched_rules):
             is_subset = False
@@ -668,15 +671,15 @@ def run_ai_batch_processing(items, is_batch_file=False):
         unique_norms = unique_vectors / (np.linalg.norm(unique_vectors, axis=1, keepdims=True) + 1e-9)
 
         all_pure_signatures = [
-            purify_text(prescrub_text(orig, use_whitelist=True, current_valid_words=local_valid_words, current_stemmed_whitelist=local_stemmed_whitelist, current_pattern=local_master_rule_pattern), local_valid_words, local_stemmed_whitelist) 
+            purify_text(prescrub_text(orig, use_whitelist=True, current_valid_words=local_valid_words, current_stemmed_whitelist=local_stemmed_whitelist, current_pattern=local_master_rule_pattern), local_valid_words, local_stemmed_whitelist)
             for orig in original_phrases_list
         ]
-        
+
         unique_pure = list(set(all_pure_signatures))
         pure_to_idx = {p: i for i, p in enumerate(unique_pure)}
         unique_pure_vecs = embedder.encode(unique_pure, batch_size=256)
         unique_pure_norms = unique_pure_vecs / (np.linalg.norm(unique_pure_vecs, axis=1, keepdims=True) + 1e-9)
-        
+
         # VECTORIZED INDEXING
         indices = [pure_to_idx[p] for p in all_pure_signatures]
         pure_norms_array = unique_pure_norms[indices]
@@ -686,7 +689,7 @@ def run_ai_batch_processing(items, is_batch_file=False):
         def process_single_ai_item(i_queue):
             row_id = ai_queue_rows[i_queue]
             original_phrase = original_phrases_list[i_queue]
-            
+
             candidates = item_candidates_list[i_queue]
             num_candidates = len(candidates)
             indices_cand = [cand_to_idx[c] for c in candidates]
@@ -695,7 +698,7 @@ def run_ai_batch_processing(items, is_batch_file=False):
             strict_signature = prescrub_text(original_phrase, use_whitelist=True, current_valid_words=local_valid_words, current_stemmed_whitelist=local_stemmed_whitelist, current_pattern=local_master_rule_pattern)
             pure_signature = all_pure_signatures[i_queue]
             base_words = get_stemmed_words(pure_signature)
-            
+
             pure_norm = pure_norms_array[i_queue:i_queue+1]
             pure_semantic_scores = np.dot(pure_norm, local_lookup_embeddings.T)[0]
 
@@ -706,14 +709,14 @@ def run_ai_batch_processing(items, is_batch_file=False):
 
             # PRE-COMPILED REGEX LOOP INSTEAD OF DYNAMIC
             input_core_regexes = [
-                pattern for pattern in local_compiled_broad_categories 
+                pattern for pattern in local_compiled_broad_categories
                 if pattern.search(strict_signature)
             ]
 
             for c_idx in range(num_candidates):
                 semantic_scores = all_semantic_scores[c_idx]
                 combined_max_scores = np.maximum(semantic_scores, pure_semantic_scores)
-                
+
                 # NUMPY ARGPARTITION UPGRADE (MASSIVE SPEED BOOST)
                 if len(combined_max_scores) > top_k:
                     idx_part = np.argpartition(combined_max_scores, -top_k)[-top_k:]
@@ -737,7 +740,7 @@ def run_ai_batch_processing(items, is_batch_file=False):
                         candidate_lower = lookup_candidate_original.lower()
                         has_matching_core = any(core_re.search(candidate_lower) for core_re in input_core_regexes)
                         if not has_matching_core:
-                            combined_score *= 0.40 
+                            combined_score *= 0.40
 
                     collected_matches.append((combined_score, lookup_candidate_original))
 
@@ -787,36 +790,36 @@ def run_ai_batch_processing(items, is_batch_file=False):
 
         ollama_cache = {}
         ollama_cache_lock = threading.Lock()
-        
+
         total_ai_items = len(ai_queue_phrases)
         processed_count = [0]
         progress_lock = threading.Lock()
 
         def worker(i_queue):
             row_id, original_phrase, final_match, final_id = process_single_ai_item(i_queue)
-            
+
             if final_id == "REQUIRES HUMAN" or final_match == "No good match":
                 with ollama_cache_lock:
                     in_cache = original_phrase in ollama_cache
                     if in_cache:
                         ai_result = ollama_cache[original_phrase]
-                
+
                 if not in_cache:
                     ai_result = ask_maintenance_director_ollama(original_phrase, local_lookup_phrases_original)
                     with ollama_cache_lock:
                         if original_phrase not in ollama_cache:
                             ollama_cache[original_phrase] = ai_result
-                
+
                 with progress_lock:
                     processed_count[0] += 1
                     current = processed_count[0]
-                
+
                 if ai_result and ai_result.get("matched_asset"):
                     conf = str(ai_result.get("confidence", "")).strip().lower()
                     raw_ollama_guess = ai_result["matched_asset"]
-                    
+
                     strict_match = validate_and_format(raw_ollama_guess)
-                    
+
                     if conf == "low" or strict_match == "No good match":
                         print(f"[{current}/{total_ai_items}] Ollama guessed loosely or failed UF validation: '{raw_ollama_guess}'. Rejecting guess.")
                         final_match = "No good match"
@@ -871,7 +874,7 @@ def delete_rule():
 def batch_learn():
     data = request.json
     items = data.get('items', [])
-    
+
     if not items:
         return jsonify({"status": "ignored", "message": "No items provided"}), 400
 
@@ -909,7 +912,7 @@ def batch_file():
 
     df = pd.read_csv(input_file, sep='\t', dtype=str, encoding='utf-8-sig')
     records = df.to_dict('records')
-    
+
     results = run_ai_batch_processing(records, is_batch_file=True)
 
     for r in results:
@@ -931,56 +934,56 @@ def prescrub_file():
         return jsonify({"status": "error", "message": "Input file not found"}), 400
 
     df = pd.read_csv(input_file, sep='\t', dtype=str, encoding='utf-8-sig')
-    
+
     records = df.to_dict('records')
     processed_data = []
-    
+
     # Grab local pointers for thread-safe reads during the loop
     with knowledge_base_lock:
         local_valid_words = uniformat_valid_words
         local_stemmed_whitelist = stemmed_whitelist
         local_master_rule_pattern = master_rule_pattern
-        
+
     # PRE-COMPILE LEARNED RULES FOR THE PRE-SCRUB LOOP
     with custom_rules_lock:
         sorted_custom_rules = sorted(custom_rules.items(), key=lambda x: len(x[0]), reverse=True)
         compiled_custom_rules = [
-            (re.compile(r'\b' + re.escape(k) + r'(?:s|es)?\b'), v) 
+            (re.compile(r'\b' + re.escape(k) + r'(?:s|es)?\b'), v)
             for k, v in sorted_custom_rules if k
         ]
-    
+
     for row in records:
         row_id = str(row.get('Row', ''))
         building = str(row.get('Building', '')).strip()
         original_phrase = str(row.get('Phrase', '')).strip()
         if original_phrase == 'nan': original_phrase = ''
-        
+
         extracted_loc, text_no_loc = extract_locations(original_phrase)
         asset_id, base_phrase = extract_asset_identifiers(text_no_loc)
-        
+
         # 1. Apply Uniformat_Rules (Aliases/Translations)
-        scrubbed = prescrub_text(base_phrase, use_whitelist=True, 
-                                 current_valid_words=local_valid_words, 
+        scrubbed = prescrub_text(base_phrase, use_whitelist=True,
+                                 current_valid_words=local_valid_words,
                                  current_stemmed_whitelist=local_stemmed_whitelist,
                                  current_pattern=local_master_rule_pattern)
-        
+
         # 2. Apply Uniformat_Learned (Memory Overrides)
         eval_phrase = scrubbed
         match_found = custom_rules.get(scrubbed)
-        
+
         if not match_found:
             for rule_regex, rule_val in compiled_custom_rules:
                 if rule_regex.search(scrubbed):
                     match_found = rule_val
                     break
-        
+
         if match_found:
             eval_phrase = match_found # Swap to the learned CMMS asset name
-        
+
         # 3. Evaluate the smartest version of the phrase
         sys_group, hierarchy = categorize_asset(eval_phrase)
         pm_suitability = determine_pm_suitability(eval_phrase)
-        
+
         processed_data.append({
             "Row": row_id,
             "Building": building,
@@ -993,24 +996,24 @@ def prescrub_file():
             "Audit Flag": "",
             "PM Suitability": pm_suitability
         })
-        
+
     df_processed = pd.DataFrame(processed_data)
-    
+
     for bldg in df_processed['Building'].unique():
         if not bldg or str(bldg).strip().lower() == 'nan': continue
         bldg_mask = df_processed['Building'] == bldg
-        
+
         ambiguous_mask = bldg_mask & (df_processed['System Group'] == 'Ambiguous Fuel System')
-        
+
         if ambiguous_mask.any():
             has_fp = (bldg_mask & (df_processed['System Group'] == 'Fire Pump System')).any()
             has_gen = (bldg_mask & (df_processed['System Group'] == 'Emergency Power') & (df_processed['Hierarchy'] == 'Parent')).any()
             has_boiler = (bldg_mask & df_processed['Scrubbed Phrase'].str.contains(r'\bboiler\b|\bblr\b', case=False, regex=True)).any()
-            
+
             for idx in df_processed[ambiguous_mask].index:
                 phrase = str(df_processed.at[idx, 'Scrubbed Phrase']).lower()
                 is_day_tank = 'day tank' in phrase
-                
+
                 if is_day_tank:
                     if has_fp and not has_gen:
                         df_processed.at[idx, 'System Group'] = 'Fire Pump System'
@@ -1032,27 +1035,27 @@ def prescrub_file():
     for bldg in df_processed['Building'].unique():
         if not bldg or str(bldg).strip().lower() == 'nan': continue
         bldg_mask = df_processed['Building'] == bldg
-        
+
         for rule in HIERARCHY_RULES:
             group_name = rule['group']
             group_mask = bldg_mask & (df_processed['System Group'] == group_name)
-            
+
             if not group_mask.any(): continue
-                
+
             parents = df_processed[group_mask & (df_processed['Hierarchy'] == 'Parent')]
             children = df_processed[group_mask & (df_processed['Hierarchy'] == 'Child')]
-            
+
             p_count, c_count = len(parents), len(children)
             audit_msg = ""
-            
+
             if group_name == "Split HVAC":
-                if p_count > 0 and c_count == 0: 
+                if p_count > 0 and c_count == 0:
                     audit_msg = "⚠️ Split HVAC: Missing Child (e.g., Fan Coil, Indoor Unit)"
-                elif c_count > 0 and p_count == 0: 
+                elif c_count > 0 and p_count == 0:
                     audit_msg = "⚠️ Split HVAC: Missing Parent (e.g., Condenser, Outdoor Unit)"
-                elif p_count > 0 and c_count > 0: 
+                elif p_count > 0 and c_count > 0:
                     audit_msg = "Matched Split HVAC System"
-                    
+
             elif group_name in ["Life Safety / Fire", "Emergency Power", "Fire Pump System", "Vertical Transport", "Fire Sprinkler"]:
                 parent_labels = {
                     "Life Safety / Fire": "Parent (e.g., Main FACP, Fire Panel)",
@@ -1061,14 +1064,14 @@ def prescrub_file():
                     "Vertical Transport": "Parent (e.g., Elevator Cab, Escalator)",
                     "Fire Sprinkler": "Parent (e.g., Sprinkler Riser System)"
                 }
-                
+
                 flag_text = parent_labels.get(group_name, "Parent Asset")
-                
-                if c_count > 0 and p_count == 0: 
+
+                if c_count > 0 and p_count == 0:
                     audit_msg = f"⚠️ {group_name}: Missing {flag_text}"
-                elif p_count > 0: 
+                elif p_count > 0:
                     audit_msg = f"Valid {group_name} System"
-                
+
             if audit_msg: df_processed.loc[group_mask, 'Audit Flag'] = audit_msg
 
     df_processed.fillna("", inplace=True)
